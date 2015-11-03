@@ -17,6 +17,10 @@ public class Page<T> {
     private List<T> items;
 
     public Page(int page, int offset, Source source) {
+        // this is, for last page...
+
+        // we will know it is last page because there are no items... actually, all other
+        // arguments should be ignored for an empty page (size == 0)
         this(page, offset, source, Collections.<T>emptyList());
     }
 
@@ -46,5 +50,9 @@ public class Page<T> {
 
     public List<T> getItems() {
         return items;
+    }
+
+    public boolean isEmpty() {
+        return size == 0;
     }
 }
