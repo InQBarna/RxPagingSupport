@@ -76,4 +76,13 @@ public class PageRequest {
     public int getEnd() {
         return offset + size - 1;
     }
+
+    @Override
+    public String toString() {
+        return "PageRequest{" +
+                "type=" + type +
+                ", offset=" + offset +
+                ", size=" + size +
+                '}';
+    }
 }

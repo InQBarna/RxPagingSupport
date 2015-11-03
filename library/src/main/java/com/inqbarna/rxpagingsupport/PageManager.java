@@ -80,8 +80,9 @@ public class PageManager<T> {
         }
     }
 
-    public ConnectionManager beginConnection() {
-        return new ConnectionManager();
+    public void beginConnection(RxDataConnection<T> dataConnection) {
+        ConnectionManager connectionManager = new ConnectionManager();
+        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dataConnection));
     }
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
@@ -107,7 +108,9 @@ public class PageManager<T> {
         if (pages.isEmpty()) {
             int numPagesReq = settings.getPageSize();
             for (int i = 0; i < numPagesReq; i++) {
-                requestsSubject.onNext(PageRequest.createFromPageAndSize(PageRequest.Type.Network, i, settings.getPageSize()));
+                PageRequest pageRequest = PageRequest.createFromPageAndSize(PageRequest.Type.Network, i, settings.getPageSize());
+                settings.getLogger().debug("Will send request: " + pageRequest, null);
+                requestsSubject.onNext(pageRequest);
             }
         } else {
             settings.getLogger().info("Not doing any initial request, lists are not empty", null);
@@ -250,11 +253,13 @@ public class PageManager<T> {
     public void addPage(Page<T> page) {
 
         if (page.isEmpty()) {
+            settings.getLogger().debug("Got last \"empty\" page", null);
             lastPageSeen = true;
             adapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
             return;
         }
 
+        settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + page.getSize(), null);
         PageInfo<T> initPage = PageInfo.fromPage(page);
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)

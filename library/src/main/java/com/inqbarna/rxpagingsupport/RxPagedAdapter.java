@@ -70,8 +70,8 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         return manager.getItem(pos);
     }
 
-    public PageManager<T>.ConnectionManager beginConnection() {
-        return manager.beginConnection();
+    public void beginConnection(RxDataConnection<T> dataConnection) {
+        manager.beginConnection(dataConnection);
     }
 
     public int getTotalCount() {

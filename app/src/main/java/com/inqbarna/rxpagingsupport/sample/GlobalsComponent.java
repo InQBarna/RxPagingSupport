@@ -1,5 +1,7 @@
 package com.inqbarna.rxpagingsupport.sample;
 
+import com.inqbarna.rxpagingsupport.Settings;
+
 import javax.inject.Singleton;
 
 import dagger.Component;
@@ -13,4 +15,6 @@ import dagger.Component;
 @Component(modules = {DataModule.class})
 public interface GlobalsComponent {
     DataConnection<DataItem> getDataConnection();
+
+    Settings getRxSettings();
 }

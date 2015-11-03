@@ -1,21 +1,24 @@
 package com.inqbarna.rxpagingsupport.sample;
 
-import android.content.Intent;
-import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.assertion.ViewAssertions;
 import android.support.test.rule.ActivityTestRule;
 import android.support.test.runner.AndroidJUnit4;
+import android.util.Log;
+
+import com.inqbarna.rxpagingsupport.Page;
+import com.inqbarna.rxpagingsupport.Settings;
 
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import static android.support.test.espresso.Espresso.onView;
+import static android.support.test.espresso.matcher.ViewMatchers.assertThat;
 import static android.support.test.espresso.matcher.ViewMatchers.hasDescendant;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withId;
 import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
 /**
@@ -25,23 +28,50 @@ import static org.hamcrest.Matchers.not;
 @RunWith(AndroidJUnit4.class)
 public class MainActivityTest {
 
-    @Rule
+//    @Rule
     public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
 
+    @Rule
+    public ActivityTestRule<MainActivity> tr = new ActivityTestRule<MainActivity>(MainActivity.class);
 
     @Test
-    public void testLoadingShown() {
-        activityRule.launchActivity(new Intent(InstrumentationRegistry.getTargetContext(), MainActivity.class));
-        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
+    public void simpleTest() {
+//        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
+        int var = 2;
+        assertThat(var, is(3));
     }
 
-    @Test
-    public void loadFirstPagesHidesProgress() throws InterruptedException {
-        activityRule.launchActivity(new Intent(InstrumentationRegistry.getTargetContext(), MainActivity.class));
+//    @Test
+    public void testLoadingShown() throws InterruptedException {
+
+        Settings settings = activityRule.getComponent().getRxSettings();
+        final TestAsyncHelper helper = new TestAsyncHelper();
+        helper.configureCountDown(settings.getPageSpan());
+
+        TestDataSource dataConnection = activityRule.getDataConnection();
+        dataConnection.setDataSourceListener(
+                new TestDataSource.DataSourceListener() {
+                    @Override
+                    public void onNewNetworkPage(Page<DataItem> dataItemPage, int networkPages) {
+                        Log.d("TEST", "generated new network page (total): " + networkPages);
+                        helper.countDown();
+                    }
+
+                    @Override
+                    public void onNewDiskPage(Page<DataItem> dataItemPage, int diskPages) {
+
+                    }
+                }
+        );
+
+
         activityRule.getActivity().beginBindingData();
 
-        Thread.sleep(2000);
+        boolean countEnded = helper.awaitCountdown(10);
+        assertThat(countEnded, is(true));
 
+        assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan()));
         onView(withId(R.id.recycler)).check(ViewAssertions.matches(not(hasDescendant(allOf(withId(R.id.progress), isDisplayed())))));
+        assertThat(dataConnection.getDiskPages(), is(0));
     }
 }
