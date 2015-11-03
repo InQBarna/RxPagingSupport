@@ -11,6 +11,7 @@ import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
 import rx.Observer;
@@ -84,8 +85,33 @@ public class PageManager<T> {
     }
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
-        return incomes.observeOn(AndroidSchedulers.mainThread())
-                .subscribe(pageIncomeObserver);
+        final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
+                                              .subscribe(pageIncomeObserver);
+        onBoundToIncomes();
+        return subscription;
+    }
+
+    private void onBoundToIncomes() {
+        deliverMessagesScheduler.createWorker()
+                .schedule(
+                        new Action0() {
+                            @Override
+                            public void call() {
+                                sendInitialRequests();
+                            }
+                        }, 300, TimeUnit.MILLISECONDS
+                );
+    }
+
+    private void sendInitialRequests() {
+        if (pages.isEmpty()) {
+            int numPagesReq = settings.getPageSize();
+            for (int i = 0; i < numPagesReq; i++) {
+                requestsSubject.onNext(PageRequest.createFromPageAndSize(PageRequest.Type.Network, i, settings.getPageSize()));
+            }
+        } else {
+            settings.getLogger().info("Not doing any initial request, lists are not empty", null);
+        }
     }
 
 

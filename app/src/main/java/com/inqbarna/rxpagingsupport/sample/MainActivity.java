@@ -13,7 +13,7 @@ import com.inqbarna.rxpagingsupport.Settings;
 import butterknife.Bind;
 import butterknife.ButterKnife;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends BaseActivity {
 
     private static final String TAG = "RxPaging";
 
@@ -49,4 +49,11 @@ public class MainActivity extends AppCompatActivity {
         adapter = new TestAdapter(Settings.builder().setLogger(logger).build(), savedInstanceState);
         recyclerView.setAdapter(adapter);
     }
+
+
+    public void beginBindingData() {
+        getComponent().getDataConnection().connectWith(adapter);
+    }
+
+
 }

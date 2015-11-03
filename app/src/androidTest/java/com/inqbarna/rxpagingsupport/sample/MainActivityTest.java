@@ -15,6 +15,8 @@ import static android.support.test.espresso.matcher.ViewMatchers.hasDescendant;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withId;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.anyOf;
+import static org.hamcrest.Matchers.not;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -24,12 +26,22 @@ import static org.hamcrest.Matchers.allOf;
 public class MainActivityTest {
 
     @Rule
-    public ActivityTestRule<MainActivity> activityRule = new ActivityTestRule<MainActivity>(MainActivity.class);
+    public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
+
 
     @Test
     public void testLoadingShown() {
         activityRule.launchActivity(new Intent(InstrumentationRegistry.getTargetContext(), MainActivity.class));
-
         onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
+    }
+
+    @Test
+    public void loadFirstPagesHidesProgress() throws InterruptedException {
+        activityRule.launchActivity(new Intent(InstrumentationRegistry.getTargetContext(), MainActivity.class));
+        activityRule.getActivity().beginBindingData();
+
+        Thread.sleep(2000);
+
+        onView(withId(R.id.recycler)).check(ViewAssertions.matches(not(hasDescendant(allOf(withId(R.id.progress), isDisplayed())))));
     }
 }

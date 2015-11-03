@@ -39,6 +39,10 @@ public class PageRequest {
         return request;
     }
 
+    public int getPage() {
+        return offset / size;
+    }
+
     public enum Type {
         /** Just get contents from network for later request. */
         Prefetch,
