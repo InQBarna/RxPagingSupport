@@ -106,7 +106,7 @@ public class PageManager<T> {
 
     private void sendInitialRequests() {
         if (pages.isEmpty()) {
-            int numPagesReq = settings.getPageSize();
+            int numPagesReq = settings.getPageSpan();
             for (int i = 0; i < numPagesReq; i++) {
                 PageRequest pageRequest = PageRequest.createFromPageAndSize(PageRequest.Type.Network, i, settings.getPageSize());
                 settings.getLogger().debug("Will send request: " + pageRequest, null);

@@ -23,11 +23,11 @@ public class InjectedActivityTestRule<T extends Activity> extends ActivityTestRu
     @Override
     protected void afterActivityLaunched() {
 
-//        component = DaggerGlobalsComponent.builder().dataModule(new TestDataModule(dataConnection)).build();
-//
-//        if (getActivity() instanceof BaseActivity) {
-//            ((BaseActivity) getActivity()).setComponent(component);
-//        }
+        component = DaggerGlobalsComponent.builder().dataModule(new TestDataModule(dataConnection)).build();
+
+        if (getActivity() instanceof BaseActivity) {
+            ((BaseActivity) getActivity()).setComponent(component);
+        }
     }
 
     public GlobalsComponent getComponent() {

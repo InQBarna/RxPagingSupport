@@ -41,7 +41,7 @@ public class TestDataSource extends RxDataConnection<DataItem> {
 
     private Page<DataItem> generatePage(PageRequest request, Source source) {
         List<DataItem> items = new ArrayList<>();
-        for (int i = request.getOffset(); i < request.getEnd(); i++) {
+        for (int i = request.getOffset(); i <= request.getEnd(); i++) {
             items.add(new DataItem(request.getPage(), i));
         }
         return new Page<DataItem>(request.getPage(), request.getOffset(), source, items);
@@ -49,11 +49,11 @@ public class TestDataSource extends RxDataConnection<DataItem> {
 
     @Override
     protected Observable<? extends Page<DataItem>> processDiskRequest(PageRequest pageRequest) {
-        return Observable.just(generatePage(pageRequest, Source.Network)).doOnNext(
+        return Observable.just(generatePage(pageRequest, Source.Cache)).doOnNext(
                 new Action1<Page<DataItem>>() {
                     @Override
                     public void call(Page<DataItem> dataItemPage) {
-                        accountNewNetworkPage(dataItemPage);
+                        accountDiskPage(dataItemPage);
                     }
                 }
         );
@@ -68,12 +68,12 @@ public class TestDataSource extends RxDataConnection<DataItem> {
 
     @Override
     protected Observable<? extends Page<DataItem>> processNetRequest(PageRequest pageRequest) {
-        return Observable.just(generatePage(pageRequest, Source.Cache))
+        return Observable.just(generatePage(pageRequest, Source.Network))
                 .doOnNext(
                         new Action1<Page<DataItem>>() {
                             @Override
                             public void call(Page<DataItem> dataItemPage) {
-                                accountDiskPage(dataItemPage);
+                                accountNewNetworkPage(dataItemPage);
                             }
                         }
                 );

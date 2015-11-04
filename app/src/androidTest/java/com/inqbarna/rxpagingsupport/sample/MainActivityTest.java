@@ -28,21 +28,18 @@ import static org.hamcrest.Matchers.not;
 @RunWith(AndroidJUnit4.class)
 public class MainActivityTest {
 
-//    @Rule
+    @Rule
     public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
 
-    @Rule
-    public ActivityTestRule<MainActivity> tr = new ActivityTestRule<MainActivity>(MainActivity.class);
-
-    @Test
+//    @Test
     public void simpleTest() {
-//        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
-        int var = 2;
-        assertThat(var, is(3));
+        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
     }
 
-//    @Test
+    @Test
     public void testLoadingShown() throws InterruptedException {
+
+        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
 
         Settings settings = activityRule.getComponent().getRxSettings();
         final TestAsyncHelper helper = new TestAsyncHelper();
@@ -67,7 +64,7 @@ public class MainActivityTest {
 
         activityRule.getActivity().beginBindingData();
 
-        boolean countEnded = helper.awaitCountdown(10);
+        boolean countEnded = helper.awaitCountdown(4);
         assertThat(countEnded, is(true));
 
         assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan()));
