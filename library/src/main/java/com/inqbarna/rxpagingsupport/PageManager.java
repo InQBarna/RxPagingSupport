@@ -343,7 +343,7 @@ public class PageManager<T> {
 
     public void addPage(Page<T> page) {
 
-        PageInfo<T> initPage;
+        PageInfo<T> newPage;
         try {
             if (page.isEmpty()) {
                 acknowledgeLastPage();
@@ -351,89 +351,123 @@ public class PageManager<T> {
             }
 
             settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + page.getSize(), null);
-            initPage = PageInfo.fromPage(page);
+            newPage = PageInfo.fromPage(page);
         } catch (Throwable throwable) {
             settings.getLogger().error("Error on incoming page: " + page.getPage(), throwable);
             forwardError(throwable);
             return;
         }
 
-        if (initPage.getSize() != settings.getPageSize()) {
+        if (newPage.getSize() != settings.getPageSize()) {
             settings.getLogger().info(
-                    "Probably we got last page, because it's smaller than requested page size..." + initPage.getSize() + " < " + settings.getPageSize() + " pageNo = "
-                            + initPage.pageNumber, null);
+                    "Probably we got last page, because it's smaller than requested page size..." + newPage.getSize() + " < " + settings.getPageSize() + " pageNo = "
+                            + newPage.pageNumber, null);
             // TODO: 4/11/15 do something special here? or let the request next page return the empty page....
         }
 
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)
-            insertPage(initPage);
+            insertPage(newPage, false);
             adapter.notifyDataSetChanged();
         } else {
 
             //__, __, 2, 3, __, 5, 6, 7, __, __
 
             // both cannot be null, because numPages is != 0
-            PageInfo<T> ceiling = pages.ceiling(initPage);
-            PageInfo<T> floor = pages.floor(initPage);
-            int offsetSize;
-            boolean toAdd = true;
+            PageInfo<T> ceiling = pages.ceiling(newPage);
+            PageInfo<T> floor = pages.floor(newPage);
 
             if (null == ceiling) {
                 // we're adding page on the top side....
 
-                initPage.adapterRange = initPage.adapterRange.offset(totalCount);
-                floor = null;
-                offsetSize = 0; // we won't offset pages indeed
-
+                addNewPageAtEnd(newPage);
             } else if (null == floor) {
                 // we're adding page on the bottom side
                 // we have to offset every page on the right of this...
 
-                floor = initPage;
-
-                offsetSize = initPage.getSize(); // we will offset existing pages by this page size
+                addNewPageAtBegining(newPage);
 
             } else {
                 if (pages.comparator().compare(ceiling, floor) == 0) {
                     // both are the same, and seems that we're replacing page then!
-                    offsetSize = replacePages(initPage, floor);
-                    floor = initPage;
-                    toAdd = false;
+                    int offsetSize = replacePages(newPage, floor);
+                    applyOffsetToItemsFrom(newPage, offsetSize);
+                    // we changed items... (else, we replaced a page)
+                    if (offsetSize > 0) {
+                        // we replaced pages, with bigger page...
+                        adapter.notifyItemRangeInserted(newPage.adapterRange.to - offsetSize, offsetSize);
+                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize() - offsetSize);
+                    } else if (offsetSize < 0) {
+                        adapter.notifyItemRangeRemoved(newPage.adapterRange.to, -offsetSize);
+                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                    } else {
+                        // we just replaced, with same size page...
+                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                    }
                 } else {
                     // we're a page, in the middle of floor ... ceiling
-                    initPage.adapterRange = initPage.adapterRange.offset(floor.adapterRange.to + 1);
-                    floor = initPage;
-                    offsetSize = initPage.getSize(); // we will offset existing pages by this page size
-                }
-            }
-
-            if (null != floor) {
-                List<PageInfo<T>> aboveFloor = new ArrayList<>(pages.tailSet(floor, false).descendingSet());
-                for (PageInfo<T> pi : aboveFloor) {
-                    offsetPage(pi, offsetSize);
-                }
-            }
-
-            if (toAdd) {
-                insertPage(initPage);
-                adapter.notifyItemRangeInserted(initPage.adapterRange.from, initPage.getSize());
-            } else {
-                // we changed items... (else, we replaced a page)
-                if (offsetSize > 0) {
-                    // we replaced pages, with bigger page...
-                    adapter.notifyItemRangeInserted(initPage.adapterRange.to - offsetSize, offsetSize);
-                    adapter.notifyItemRangeChanged(initPage.adapterRange.from, initPage.getSize() - offsetSize);
-                } else if (offsetSize < 0) {
-                    adapter.notifyItemRangeRemoved(initPage.adapterRange.to, -offsetSize);
-                    adapter.notifyItemRangeChanged(initPage.adapterRange.from, initPage.getSize());
-                } else {
-                    // we just replaced, with same size page...
-                    adapter.notifyItemRangeChanged(initPage.adapterRange.from, initPage.getSize());
+                    addNewPageAfter(newPage, floor);
                 }
             }
         }
+    }
 
+    private void addNewPageAfter(PageInfo<T> newPage, PageInfo<T> floor) {
+        if (numPages == settings.getPageSpan()) {
+            // which side to remove, left or right?
+            final int itemsLeft = pages.headSet(newPage, false).size();
+            final int itemsRight = pages.tailSet(newPage, false).size();
+            if (itemsLeft >= itemsRight) {
+                removeFirstPage();
+            } else {
+                removeLastPage();
+            }
+        }
+
+        newPage.adapterRange = newPage.adapterRange.offset(floor.adapterRange.to + 1);
+        insertPage(newPage, true);
+    }
+
+    private void addNewPageAtBegining(PageInfo<T> newPage) {
+        if (numPages == settings.getPageSpan()) {
+            removeLastPage();
+        }
+
+
+        insertPage(newPage, true);
+    }
+
+    private void removeLastPage() {
+        PageInfo<T> toRemove = pages.pollLast();
+        pageMap.remove(toRemove.adapterRange);
+        totalCount -= toRemove.getSize();
+        numPages--;
+        adapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+    }
+
+    private void applyOffsetToItemsFrom(PageInfo<T> floor, int offsetSize) {
+        List<PageInfo<T>> aboveFloor = new ArrayList<>(pages.tailSet(floor, false).descendingSet());
+        for (PageInfo<T> pi : aboveFloor) {
+            offsetPage(pi, offsetSize);
+        }
+    }
+
+    private void addNewPageAtEnd(PageInfo<T> newPage) {
+        if (numPages == settings.getPageSpan()) {
+            removeFirstPage();
+        }
+
+        newPage.adapterRange = newPage.adapterRange.offset(totalCount);
+        insertPage(newPage, false);
+    }
+
+    private void removeFirstPage() {
+        PageInfo<T> toRemove = pages.pollFirst();
+        pageMap.remove(toRemove.adapterRange);
+        totalCount -= toRemove.getSize();
+        numPages--;
+        adapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+        applyOffsetToItemsFrom(toRemove, -toRemove.getSize());
     }
 
     private void acknowledgeLastPage() {
@@ -471,12 +505,16 @@ public class PageManager<T> {
         pageMap.put(pi.adapterRange, pi);
     }
 
-    private void insertPage(PageInfo<T> initPage) {
-        pageMap.put(initPage.adapterRange, initPage);
-        pages.add(initPage);
-        totalCount += initPage.getSize();
-        maxPageNumberSeen = Math.max(maxPageNumberSeen, initPage.pageNumber);
+    private void insertPage(PageInfo<T> newPage, boolean withOffsets) {
+        if (withOffsets) {
+            applyOffsetToItemsFrom(newPage, newPage.getSize());
+        }
+        pageMap.put(newPage.adapterRange, newPage);
+        pages.add(newPage);
+        totalCount += newPage.getSize();
+        maxPageNumberSeen = Math.max(maxPageNumberSeen, newPage.pageNumber);
         numPages++;
+        adapter.notifyItemRangeInserted(newPage.adapterRange.from, newPage.getSize());
     }
 
 
