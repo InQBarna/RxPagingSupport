@@ -2,6 +2,7 @@ package com.inqbarna.rxpagingsupport;
 
 import android.os.Bundle;
 import android.support.v7.widget.RecyclerView;
+import android.util.SparseArray;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -9,6 +10,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
@@ -56,13 +58,23 @@ public class PageManager<T> {
             return null == pageItems ? 0 : pageItems.size();
         }
 
-        static <T> PageInfo<T> fromPage(Page<T> page) {
+        static <T> PageInfo<T> fromPage(Page<T> page) throws Throwable {
             PageInfo<T> info = new PageInfo<>();
             info.pageNumber = page.getPage();
             info.pageSource = page.getSource();
             info.setItems(page.getItems(), page.getOffset());
             info.adapterRange = new IdxRange(0, page.getSize() - 1);
             return info;
+        }
+
+        @Override
+        public String toString() {
+            final StringBuilder sb = new StringBuilder("PageInfo{");
+            sb.append("pageSource=").append(pageSource);
+            sb.append(", pageNumber=").append(pageNumber);
+            sb.append(", pageItems=").append(null != pageItems ? pageItems.size() : 0);
+            sb.append('}');
+            return sb.toString();
         }
     }
 
@@ -80,9 +92,10 @@ public class PageManager<T> {
         }
     }
 
-    public void beginConnection(RxDataConnection<T> dataConnection) {
+    public void beginConnection(RxPageDispatcher<T> dispatcher) {
+        // TODO: 4/11/15 I'm maintaining original idea of connection manager, but I will probably get rid of that and do what it does right here
         ConnectionManager connectionManager = new ConnectionManager();
-        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dataConnection));
+        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dispatcher));
     }
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
@@ -108,9 +121,7 @@ public class PageManager<T> {
         if (pages.isEmpty()) {
             int numPagesReq = settings.getPageSpan();
             for (int i = 0; i < numPagesReq; i++) {
-                PageRequest pageRequest = PageRequest.createFromPageAndSize(PageRequest.Type.Network, i, settings.getPageSize());
-                settings.getLogger().debug("Will send request: " + pageRequest, null);
-                requestsSubject.onNext(pageRequest);
+                requestPage(i);
             }
         } else {
             settings.getLogger().info("Not doing any initial request, lists are not empty", null);
@@ -118,17 +129,48 @@ public class PageManager<T> {
     }
 
 
-    private RecyclerView.OnScrollListener scrollListener = new RecyclerView.OnScrollListener() {
-        @Override
-        public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
-            // TODO: 3/11/15 detect movement
+    private ManagerScrollListener scrollListener = new ManagerScrollListener();
+
+    private void requestPage(int pageNo) {
+        PageRequest pageRequest = null;
+        synchronized (pendingRequests) {
+            boolean requestPending = pendingRequests.indexOfKey(pageNo) >= 0;
+            if (!requestPending) {
+                pageNo = Math.max(0, lastPageSeen ? Math.min(pageNo, maxPageNumberSeen) : pageNo); // safety clipping
+                PageRequest.Type type;
+                if (pageNo <= maxPageNumberSeen) {
+                    type = PageRequest.Type.Disk;
+                } else {
+                    type = PageRequest.Type.Network;
+                }
+                pageRequest = PageRequest.createFromPageAndSize(type, pageNo, settings.getPageSize());
+                pendingRequests.put(pageNo, pageRequest);
+            }
         }
 
-        @Override
-        public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-            // TODO: 3/11/15 detect movement
+        final int pageRequested = pageNo;
+        if (null != pageRequest) {
+            settings.getLogger().debug("Will send request: " + pageRequest, null);
+            dispatchToSubject(
+                    new Action0() {
+                        @Override
+                        public void call() {
+                            PageRequest req = null;
+                            synchronized (pendingRequests) {
+                                req = pendingRequests.get(pageRequested);
+                            }
+                            if (null != req) {
+                                requestsSubject.onNext(req);
+                            } else {
+                                settings.getLogger().error("Expected a pending request for page " + pageRequested + " but wasn't found", null);
+                            }
+                        }
+                    }
+            );
+        } else {
+            settings.getLogger().debug("Page " + pageNo + " was already in request queue", null);
         }
-    };
+    }
 
     public T getItem(int pos) {
         NavigableSet<IdxRange> ranges = pageMap.navigableKeySet();
@@ -137,27 +179,60 @@ public class PageManager<T> {
                 return pageMap.get(range).getItem(pos);
             }
         }
+        StringBuilder builder = new StringBuilder();
+        builder.append("Position ").append(pos).append(" not found in pages!\n")
+                .append("Num pages: ").append(pages.size()).append(" in list, ").append(pageMap.size()).append(" in map\n");
+        for (IdxRange r : ranges) {
+            builder.append(r).append(" with page: ").append(pageMap.get(r)).append("\n");
+        }
+
+        builder.append("In list:\n");
+        for (PageInfo<T> pi : pages) {
+            builder.append(pi).append("\n");
+        }
+        settings.getLogger().error("Item not found => " + builder.toString(), null);
         return null;
     }
 
     private Observer<? super Page<T>> pageIncomeObserver = new Observer<Page<T>>() {
         @Override
         public void onCompleted() {
+            acknowledgeLastPage();
+            clearPendingRequests();
             activeReceptionSubscription = null;
         }
 
         @Override
         public void onError(Throwable e) {
             settings.getLogger().error("Error loading pages", e);
+            acknowledgeLastPage();
             activeReceptionSubscription = null;
-            // TODO: 30/10/15 notify onwards to the user
+            clearPendingRequests();
+            forwardError(e);
         }
 
         @Override
         public void onNext(Page<T> tPage) {
+            removePendigRequest(tPage.getPage());
             addPage(tPage);
         }
     };
+
+    private void clearPendingRequests() {
+        synchronized (pendingRequests) {
+            final int qSize = pendingRequests.size();
+            if (qSize > 0) {
+                settings.getLogger().info("Will empty pending requests with " + qSize + " uncompleted requests", null);
+                pendingRequests.clear();
+            }
+        }
+    }
+
+    private void removePendigRequest(int page) {
+        synchronized (pendingRequests) {
+            pendingRequests.delete(page);
+        }
+    }
 
     private final Settings settings;
 
@@ -170,8 +245,9 @@ public class PageManager<T> {
 
     private Scheduler deliverMessagesScheduler;
 
-    private NavigableSet<PageInfo<T>>           pages;
-    private NavigableMap<IdxRange, PageInfo<T>> pageMap;
+    private       NavigableSet<PageInfo<T>>           pages;
+    private       NavigableMap<IdxRange, PageInfo<T>> pageMap;
+    private final SparseArray<PageRequest>            pendingRequests;
 
     private final RecyclerView.Adapter        adapter;
     private       PublishSubject<PageRequest> requestsSubject;
@@ -203,7 +279,12 @@ public class PageManager<T> {
             return new IdxRange(from + v, to + v);
         }
 
+        static IdxRange needle(int searchIdx) {
+            return new IdxRange(searchIdx, searchIdx);
+        }
+
         @Override
+
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
@@ -219,6 +300,14 @@ public class PageManager<T> {
             }
             return to == idxRange.to;
 
+        }
+
+        @Override
+        public String toString() {
+            return "IdxRange{" +
+                    "from=" + from +
+                    ", to=" + to +
+                    '}';
         }
 
         @Override
@@ -244,23 +333,38 @@ public class PageManager<T> {
         requestsSubject = PublishSubject.create();
         disposed = false;
         lastPageSeen = false;
+        maxPageNumberSeen = -1;
         pageMap = new ConcurrentSkipListMap<>();
         deliverMessagesScheduler = settings.getDeliveryScheduler();
+        pendingRequests = new SparseArray<>(5);
 
         // TODO: 30/10/15 restore state
     }
 
     public void addPage(Page<T> page) {
 
-        if (page.isEmpty()) {
-            settings.getLogger().debug("Got last \"empty\" page", null);
-            lastPageSeen = true;
-            adapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
+        PageInfo<T> initPage;
+        try {
+            if (page.isEmpty()) {
+                acknowledgeLastPage();
+                return;
+            }
+
+            settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + page.getSize(), null);
+            initPage = PageInfo.fromPage(page);
+        } catch (Throwable throwable) {
+            settings.getLogger().error("Error on incoming page: " + page.getPage(), throwable);
+            forwardError(throwable);
             return;
         }
 
-        settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + page.getSize(), null);
-        PageInfo<T> initPage = PageInfo.fromPage(page);
+        if (initPage.getSize() != settings.getPageSize()) {
+            settings.getLogger().info(
+                    "Probably we got last page, because it's smaller than requested page size..." + initPage.getSize() + " < " + settings.getPageSize() + " pageNo = "
+                            + initPage.pageNumber, null);
+            // TODO: 4/11/15 do something special here? or let the request next page return the empty page....
+        }
+
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)
             insertPage(initPage);
@@ -304,20 +408,18 @@ public class PageManager<T> {
                 }
             }
 
-            if (toAdd) {
-                insertPage(initPage);
-            } // else, we replaced a page
             if (null != floor) {
-                List<PageInfo<T>> aboveFloor = new ArrayList<>(pages.tailSet(floor, false));
+                List<PageInfo<T>> aboveFloor = new ArrayList<>(pages.tailSet(floor, false).descendingSet());
                 for (PageInfo<T> pi : aboveFloor) {
                     offsetPage(pi, offsetSize);
                 }
             }
 
             if (toAdd) {
+                insertPage(initPage);
                 adapter.notifyItemRangeInserted(initPage.adapterRange.from, initPage.getSize());
             } else {
-                // we changed items...
+                // we changed items... (else, we replaced a page)
                 if (offsetSize > 0) {
                     // we replaced pages, with bigger page...
                     adapter.notifyItemRangeInserted(initPage.adapterRange.to - offsetSize, offsetSize);
@@ -334,11 +436,24 @@ public class PageManager<T> {
 
     }
 
+    private void acknowledgeLastPage() {
+        if (!lastPageSeen) {
+            settings.getLogger().debug("Got last \"empty\" page", null);
+            lastPageSeen = true;
+            adapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
+        }
+    }
+
+    private void forwardError(Throwable throwable) {
+        // TODO: 4/11/15
+    }
+
     private int replacePages(PageInfo<T> newPage, PageInfo<T> oldPage) {
         int offsetSize;
         newPage.adapterRange = newPage.adapterRange.offset(oldPage.adapterRange.from);
         offsetSize = newPage.getSize() - oldPage.getSize();
         pageMap.remove(oldPage.adapterRange); // remove it because we're replacing the page
+        pageMap.put(newPage.adapterRange, newPage);
         totalCount += offsetSize;
         pages.remove(oldPage);
         pages.add(newPage);
@@ -415,6 +530,92 @@ public class PageManager<T> {
     private void dispatchToSubject(Action0 action) {
         if (null != activeReceptionSubscription) {
             deliverMessagesScheduler.createWorker().schedule(action);
+        }
+    }
+
+    private class ManagerScrollListener extends RecyclerView.OnScrollListener {
+        final int WAIT = 0;
+        final int GET_DIRECTION = 1;
+        final int SETTLE_DOWN = 2;
+
+        private int myState = WAIT; // initial state
+
+        void resetState() {
+            myState = WAIT;
+        }
+
+        @Override
+        public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+            switch (newState) {
+                case RecyclerView.SCROLL_STATE_SETTLING:
+                    if (myState == WAIT && null != activeReceptionSubscription) {
+                        myState = GET_DIRECTION;
+                    }
+                    break;
+                case RecyclerView.SCROLL_STATE_IDLE:
+                    if (myState == SETTLE_DOWN) {
+                        myState = WAIT;
+                    }
+                    break;
+                case RecyclerView.SCROLL_STATE_DRAGGING:
+                    myState = WAIT;
+                default:
+                    // no-op
+            }
+        }
+
+        @Override
+        public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+            if (myState == GET_DIRECTION) {
+                if (dy > 0) {
+                    // we're scrolling up
+                    myState = SETTLE_DOWN;
+                    onMovingUp(recyclerView);
+                } else if (dy < 0) {
+                    // we're scrolling down
+                    myState = SETTLE_DOWN;
+                    onMovingDown(recyclerView);
+                } else {
+                    settings.getLogger().info("Can't get movement direction, dy = 0", null);
+                }
+            }
+        }
+
+        private void onMovingUp(RecyclerView recyclerView) {
+            final int nChilds = recyclerView.getChildCount();
+            if (nChilds == 0) {
+                return; // should never happen indeed (we can scroll because there are elements!)
+            }
+            final int firstChildPos = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(0));
+            final int numSidePages = (settings.getPageSpan() - 1) / 2;
+            final IdxRange ceilingKey = pageMap.ceilingKey(IdxRange.needle(firstChildPos));
+            // NOTE: ceilingKey must not be null, otherwise we're doing something very bad....
+            final SortedMap<IdxRange, PageInfo<T>> headMap = pageMap.headMap(ceilingKey);
+            if (headMap.size() < numSidePages) {
+                int reqPage = 0;
+                if (headMap.size() > 0) {
+                    final PageInfo<T> firstPage = headMap.get(headMap.firstKey());
+                    reqPage = Math.max(0, firstPage.pageNumber - 1);
+                }
+                requestPage(reqPage);
+            }
+        }
+
+        private void onMovingDown(RecyclerView recyclerView) {
+            final int nChilds = recyclerView.getChildCount();
+            final int lastChild = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(nChilds - 1));
+            final int numSidePages = (settings.getPageSpan() - 1) / 2;
+            final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(lastChild));
+            // NOTE: floorKey must not be null, otherwise we're doing something very bad....
+            final SortedMap<IdxRange, PageInfo<T>> tailMap = pageMap.tailMap(floorKey);
+            if (tailMap.size() < numSidePages) {
+                int pageNoRequest = maxPageNumberSeen + 1;
+                if (tailMap.size() > 0) {
+                    PageInfo<T> lastPage = tailMap.get(tailMap.lastKey());
+                    pageNoRequest = lastPage.pageNumber + 1;
+                }
+                requestPage(pageNoRequest);
+            }
         }
     }
 }

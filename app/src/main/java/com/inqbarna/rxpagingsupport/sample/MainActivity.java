@@ -1,14 +1,9 @@
 package com.inqbarna.rxpagingsupport.sample;
 
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
-import android.util.Log;
-
-import com.inqbarna.rxpagingsupport.Settings;
 
 import butterknife.Bind;
 import butterknife.ButterKnife;
@@ -42,5 +37,21 @@ public class MainActivity extends BaseActivity {
         getComponent().getDataConnection().connectWith(adapter);
     }
 
+    @Override
+    protected void onStart() {
+        super.onStart();
+        adapter.enableMovementDetection(recyclerView);
+    }
 
+    @Override
+    protected void onStop() {
+        adapter.disableMovementDetection(recyclerView);
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        adapter.recycle();
+        super.onDestroy();
+    }
 }

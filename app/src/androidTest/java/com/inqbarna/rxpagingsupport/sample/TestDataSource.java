@@ -2,11 +2,13 @@ package com.inqbarna.rxpagingsupport.sample;
 
 import com.inqbarna.rxpagingsupport.Page;
 import com.inqbarna.rxpagingsupport.PageRequest;
-import com.inqbarna.rxpagingsupport.RxDataConnection;
+import com.inqbarna.rxpagingsupport.RxStdDispatcher;
 import com.inqbarna.rxpagingsupport.Source;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
 import rx.functions.Action1;
@@ -14,7 +16,7 @@ import rx.functions.Action1;
 /**
  * Created by david on 3/11/15.
  */
-public class TestDataSource extends RxDataConnection<DataItem> {
+public class TestDataSource {
 
     public interface DataSourceListener {
 
@@ -23,9 +25,37 @@ public class TestDataSource extends RxDataConnection<DataItem> {
         void onNewDiskPage(Page<DataItem> dataItemPage, int diskPages);
     }
 
+    private RxStdDispatcher.RxPageSource<DataItem> netSource = new RxStdDispatcher.RxPageSource<DataItem>() {
+        @Override
+        public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
+            return processNetRequest(pageRequest);
+        }
+    };
+
+    private RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager = new RxStdDispatcher.RxPageCacheManager<DataItem>() {
+        @Override
+        public void storePage(Page<DataItem> page) {
+            // nothing yet
+        }
+
+        @Override
+        public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
+            return processDiskRequest(pageRequest);
+        }
+    };
+
+    public RxStdDispatcher.RxPageSource<DataItem> getNetSource() {
+        return netSource;
+    }
+
+    public RxStdDispatcher.RxPageCacheManager<DataItem> getCacheManager() {
+        return cacheManager;
+    }
+
     private DataSourceListener listener;
-    private int networkPages;
-    private int diskPages;
+    private int                networkPages;
+    private int                diskPages;
+    private Random random = new Random();
 
     public int getNetworkPages() {
         return networkPages;
@@ -47,8 +77,7 @@ public class TestDataSource extends RxDataConnection<DataItem> {
         return new Page<DataItem>(request.getPage(), request.getOffset(), source, items);
     }
 
-    @Override
-    protected Observable<? extends Page<DataItem>> processDiskRequest(PageRequest pageRequest) {
+    private Observable<? extends Page<DataItem>> processDiskRequest(PageRequest pageRequest) {
         return Observable.just(generatePage(pageRequest, Source.Cache)).doOnNext(
                 new Action1<Page<DataItem>>() {
                     @Override
@@ -66,17 +95,18 @@ public class TestDataSource extends RxDataConnection<DataItem> {
         }
     }
 
-    @Override
-    protected Observable<? extends Page<DataItem>> processNetRequest(PageRequest pageRequest) {
+    private Observable<? extends Page<DataItem>> processNetRequest(PageRequest pageRequest) {
+        long delayMs = 300 + random.nextInt(700);
         return Observable.just(generatePage(pageRequest, Source.Network))
-                .doOnNext(
-                        new Action1<Page<DataItem>>() {
-                            @Override
-                            public void call(Page<DataItem> dataItemPage) {
-                                accountNewNetworkPage(dataItemPage);
-                            }
-                        }
-                );
+                         .delaySubscription(delayMs, TimeUnit.MILLISECONDS)
+                         .doOnNext(
+                                 new Action1<Page<DataItem>>() {
+                                     @Override
+                                     public void call(Page<DataItem> dataItemPage) {
+                                         accountNewNetworkPage(dataItemPage);
+                                     }
+                                 }
+                         );
     }
 
     private void accountDiskPage(Page<DataItem> dataItemPage) {

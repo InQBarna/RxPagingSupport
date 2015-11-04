@@ -3,8 +3,6 @@ package com.inqbarna.rxpagingsupport.sample;
 import android.app.Activity;
 import android.support.test.rule.ActivityTestRule;
 
-import com.inqbarna.rxpagingsupport.RxDataConnection;
-
 /**
  * @author David García <david.garcia@inqbarna.com>
  * @version 1.0 3/11/15
@@ -23,7 +21,7 @@ public class InjectedActivityTestRule<T extends Activity> extends ActivityTestRu
     @Override
     protected void afterActivityLaunched() {
 
-        component = DaggerGlobalsComponent.builder().dataModule(new TestDataModule(dataConnection)).build();
+        component = DaggerGlobalsComponent.builder().dataModule(new TestDataModule(dataConnection.getNetSource(), dataConnection.getCacheManager())).build();
 
         if (getActivity() instanceof BaseActivity) {
             ((BaseActivity) getActivity()).setComponent(component);

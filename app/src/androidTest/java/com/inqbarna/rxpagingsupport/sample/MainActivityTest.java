@@ -1,16 +1,21 @@
 package com.inqbarna.rxpagingsupport.sample;
 
 import android.support.test.espresso.assertion.ViewAssertions;
-import android.support.test.rule.ActivityTestRule;
 import android.support.test.runner.AndroidJUnit4;
 import android.util.Log;
 
 import com.inqbarna.rxpagingsupport.Page;
+import com.inqbarna.rxpagingsupport.RxPagedAdapter;
 import com.inqbarna.rxpagingsupport.Settings;
 
+import org.hamcrest.CustomTypeSafeMatcher;
+import org.hamcrest.Matcher;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import static android.support.test.espresso.Espresso.onView;
 import static android.support.test.espresso.matcher.ViewMatchers.assertThat;
@@ -18,6 +23,8 @@ import static android.support.test.espresso.matcher.ViewMatchers.hasDescendant;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withId;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 
@@ -70,5 +77,30 @@ public class MainActivityTest {
         assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan()));
         onView(withId(R.id.recycler)).check(ViewAssertions.matches(not(hasDescendant(allOf(withId(R.id.progress), isDisplayed())))));
         assertThat(dataConnection.getDiskPages(), is(0));
+
+        assertThat(activityRule.getActivity().recyclerView.getAdapter(), instanceOf(RxPagedAdapter.class));
+        RxPagedAdapter<DataItem, ?> adapter = (RxPagedAdapter<DataItem, ?>) activityRule.getActivity().recyclerView.getAdapter();
+
+        // ensure adapter has settings pages * size items
+        assertThat(adapter.getTotalCount(), is(settings.getPageSize() * settings.getPageSpan()));
+
+        // check they're ordered....
+        List<DataItem> diList = new ArrayList<>();
+        List<Matcher<? super DataItem>> orderMather = new ArrayList<>();
+        for (int i = 0; i < adapter.getTotalCount(); i++) {
+            diList.add(adapter.getItem(i));
+            orderMather.add(dataItemAtIdx(i));
+        }
+        assertThat(diList, contains(orderMather));
+
+    }
+
+    private static Matcher<DataItem> dataItemAtIdx(final int idx) {
+        return new CustomTypeSafeMatcher<DataItem>("DataItem with idx: " + idx) {
+            @Override
+            protected boolean matchesSafely(DataItem item) {
+                return idx == item.getAbsIdx();
+            }
+        };
     }
 }

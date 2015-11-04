@@ -16,6 +16,8 @@ public class Page<T> {
     private int size;
     private List<T> items;
 
+    private Throwable error;
+
     public Page(int page, int offset, Source source) {
         // this is, for last page...
 
@@ -32,11 +34,19 @@ public class Page<T> {
         this.size = this.items.size();
     }
 
+    public Page(int page, Source source, Throwable error) {
+        this.error = error;
+        this.page = page;
+        this.offset = -1; // not important
+        this.source = source;
+    }
+
     public int getPage() {
         return page;
     }
 
-    public int getOffset() {
+    public int getOffset() throws Throwable {
+        checkError();
         return offset;
     }
 
@@ -44,15 +54,24 @@ public class Page<T> {
         return source;
     }
 
-    public int getSize() {
+    public int getSize() throws Throwable {
+        checkError();
         return size;
     }
 
-    public List<T> getItems() {
+    private void checkError() throws Throwable {
+        if (null != error) {
+            throw error;
+        }
+    }
+
+    public List<T> getItems() throws Throwable {
+        checkError();
         return items;
     }
 
-    public boolean isEmpty() {
+    public boolean isEmpty() throws Throwable {
+        checkError();
         return size == 0;
     }
 }

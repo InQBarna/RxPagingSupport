@@ -16,9 +16,11 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         void setLoadingState(boolean loading);
     }
 
-    private PageManager<T> manager;
+    private       PageManager<T> manager;
+    private final Settings       settings;
 
     public RxPagedAdapter(Settings settings, Bundle savedInstanceState) {
+        this.settings = settings;
         manager = new PageManager<>(this, settings, savedInstanceState);
     }
 
@@ -51,6 +53,7 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
     @Override
     public int getItemViewType(int position) {
         if (isLastPosition(position)) {
+            settings.getLogger().debug("Should show progress at pos " + position, null);
             return RESERVED_LOADING_TYPE;
         }
         return View.NO_ID;
@@ -67,11 +70,20 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
     protected abstract VH doCreateViewHolder(ViewGroup parent, int viewType);
 
     public T getItem(int pos) {
-        return manager.getItem(pos);
+        final T item = manager.getItem(pos);
+        if (null == item) {
+            StringBuilder builder = new StringBuilder();
+            builder.append("Will crash on NPE..., no item returned:\n")
+                   .append("Item pos requested: ").append(pos).append("\n")
+                    .append("Total Count: ").append(manager.getTotalCount()).append("\n")
+                    .append("Last seen: ").append(manager.isLastPageSeen());
+            settings.getLogger().error(builder.toString(), null);
+        }
+        return item;
     }
 
-    public void beginConnection(RxDataConnection<T> dataConnection) {
-        manager.beginConnection(dataConnection);
+    public void beginConnection(RxPageDispatcher<T> dispatcher) {
+        manager.beginConnection(dispatcher);
     }
 
     public int getTotalCount() {

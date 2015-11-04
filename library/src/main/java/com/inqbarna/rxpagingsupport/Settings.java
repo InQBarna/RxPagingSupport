@@ -12,13 +12,13 @@ import rx.schedulers.Schedulers;
 public class Settings {
     private static final int DEFAULT_PAGE_SPAN = 5;
     public static final  int MAX_PAGE_SPAN     = 10;
-    public static final  int MIN_PAGE_SPAN     = 2;
+    public static final  int MIN_PAGE_SPAN     = 3;
     private static final int DEFAULT_PAGE_SIZE = 10;
 
 
-    private boolean   usePrefetch;
     private int       pageSpan;
     private int       pageSize;
+    private boolean   fallbackToCacheAfterNetworkFail;
     private Scheduler deliveryScheduler;
     private Logger    logger;
 
@@ -28,10 +28,6 @@ public class Settings {
         void info(@NonNull String msg, @Nullable Throwable throwable);
 
         void debug(@NonNull String msg, @Nullable Throwable throwable);
-    }
-
-    public boolean isUsePrefetch() {
-        return usePrefetch;
     }
 
     public int getPageSpan() {
@@ -46,14 +42,18 @@ public class Settings {
         return pageSize;
     }
 
+    public boolean hasCacheFallbackEnabled() {
+        return fallbackToCacheAfterNetworkFail;
+    }
+
     public Logger getLogger() {
         return logger;
     }
 
     private Settings() {
-        usePrefetch = true;
         pageSpan = DEFAULT_PAGE_SPAN;
         pageSize = DEFAULT_PAGE_SIZE;
+        fallbackToCacheAfterNetworkFail = true;
     }
 
 
@@ -67,13 +67,13 @@ public class Settings {
             this.settings = settings;
         }
 
-        public Builder disablePrefetch() {
-            settings.usePrefetch = false;
+        public Builder setPageSpan(int span) {
+            settings.pageSpan = Math.max(MIN_PAGE_SPAN, Math.min(span, MAX_PAGE_SPAN));
             return this;
         }
 
-        public Builder setPageSpan(int span) {
-            settings.pageSpan = Math.max(MIN_PAGE_SPAN, Math.min(span, MAX_PAGE_SPAN));
+        public Builder disableFallbackToCacheOnNetworkFailure() {
+            settings.fallbackToCacheAfterNetworkFail = false;
             return this;
         }
 

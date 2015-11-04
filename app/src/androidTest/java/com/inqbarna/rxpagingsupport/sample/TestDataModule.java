@@ -1,6 +1,6 @@
 package com.inqbarna.rxpagingsupport.sample;
 
-import com.inqbarna.rxpagingsupport.RxDataConnection;
+import com.inqbarna.rxpagingsupport.RxStdDispatcher;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -8,16 +8,24 @@ import com.inqbarna.rxpagingsupport.RxDataConnection;
  */
 public class TestDataModule extends DataModule {
 
-    private RxDataConnection<DataItem> rxDataConnection;
+    private RxStdDispatcher.RxPageSource<DataItem> pageSource;
+    private RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager;
 
-    public TestDataModule(RxDataConnection<DataItem> rxDataConnection) {
-        this.rxDataConnection = rxDataConnection;
+    public TestDataModule(
+            RxStdDispatcher.RxPageSource<DataItem> pageSource,
+            RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager) {
+        this.pageSource = pageSource;
+        this.cacheManager = cacheManager;
     }
 
 
     @Override
-    public RxDataConnection<DataItem> provideRxDataConnection() {
-        return rxDataConnection;
+    public RxStdDispatcher.RxPageSource<DataItem> providePageSource() {
+        return pageSource;
     }
 
+    @Override
+    public RxStdDispatcher.RxPageCacheManager<DataItem> provideCacheManager() {
+        return cacheManager;
+    }
 }

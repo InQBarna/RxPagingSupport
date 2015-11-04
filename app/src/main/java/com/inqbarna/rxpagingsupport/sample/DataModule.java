@@ -6,9 +6,12 @@ import android.util.Log;
 
 import com.inqbarna.rxpagingsupport.Page;
 import com.inqbarna.rxpagingsupport.PageRequest;
-import com.inqbarna.rxpagingsupport.RxDataConnection;
+import com.inqbarna.rxpagingsupport.RxStdDispatcher;
+import com.inqbarna.rxpagingsupport.RxPageDispatcher;
 import com.inqbarna.rxpagingsupport.RxPagedAdapter;
 import com.inqbarna.rxpagingsupport.Settings;
+
+import java.util.Set;
 
 import javax.inject.Singleton;
 
@@ -25,7 +28,7 @@ public class DataModule {
 
     @Provides
     @Singleton
-    public DataConnection<DataItem> provideDataConnection(final RxDataConnection<DataItem> dataConnection) {
+    public DataConnection<DataItem> provideDataConnection(final RxPageDispatcher<DataItem> dataConnection) {
         return new DataConnection<DataItem>() {
             @Override
             public void connectWith(RxPagedAdapter<DataItem, ?> adapter) {
@@ -36,16 +39,33 @@ public class DataModule {
 
     @Provides
     @Singleton
-    public RxDataConnection<DataItem> provideRxDataConnection() {
-        return new RxDataConnection<DataItem>() {
+    public RxPageDispatcher<DataItem> provideRxDataConnection(Settings settings, RxStdDispatcher.RxPageSource<DataItem> netSource, RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager) {
+        return RxStdDispatcher.newInstance(settings, cacheManager, netSource);
+    }
+
+    @Provides
+    @Singleton
+    public RxStdDispatcher.RxPageSource<DataItem> providePageSource() {
+        return new RxStdDispatcher.RxPageSource<DataItem>() {
             @Override
-            protected Observable<? extends Page<DataItem>> processDiskRequest(PageRequest pageRequest) {
-                return Observable.empty();
+            public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
+                return Observable.error(new UnsupportedOperationException("Not yet")); // TODO: 4/11/15 something mor interesting?
+            }
+        };
+    }
+
+    @Provides
+    @Singleton
+    public RxStdDispatcher.RxPageCacheManager<DataItem> provideCacheManager() {
+        return new RxStdDispatcher.RxPageCacheManager<DataItem>() {
+            @Override
+            public void storePage(Page<DataItem> page) {
+                // no-op
             }
 
             @Override
-            protected Observable<? extends Page<DataItem>> processNetRequest(PageRequest pageRequest) {
-                return Observable.empty();
+            public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
+                return Observable.error(new UnsupportedOperationException("Not yet"));
             }
         };
     }
