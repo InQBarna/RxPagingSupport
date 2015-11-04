@@ -49,11 +49,11 @@ public class TestAsyncHelper {
         countDownLatch = new CountDownLatch(val);
     }
 
-    public boolean awaitCountdown(long timeout) throws InterruptedException {
+    public boolean awaitCountdown(long tsSecs) throws InterruptedException {
         if (null == countDownLatch) {
             throw new NullPointerException("Call configure countdown first");
         }
-        return countDownLatch.await(timeout, TimeUnit.SECONDS);
+        return countDownLatch.await(tsSecs, TimeUnit.SECONDS);
     }
 
     public void countDown() {

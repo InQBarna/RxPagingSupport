@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static android.support.test.espresso.Espresso.onView;
+import static android.support.test.espresso.contrib.RecyclerViewActions.scrollToPosition;
 import static android.support.test.espresso.matcher.ViewMatchers.assertThat;
 import static android.support.test.espresso.matcher.ViewMatchers.hasDescendant;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
@@ -63,7 +64,8 @@ public class MainActivityTest {
 
                     @Override
                     public void onNewDiskPage(Page<DataItem> dataItemPage, int diskPages) {
-
+                        Log.d("TEST", "generated new disk page (total): " + diskPages);
+                        helper.countDown();
                     }
                 }
         );
@@ -77,10 +79,44 @@ public class MainActivityTest {
         assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan()));
         onView(withId(R.id.recycler)).check(ViewAssertions.matches(not(hasDescendant(allOf(withId(R.id.progress), isDisplayed())))));
         assertThat(dataConnection.getDiskPages(), is(0));
+        assertThat(dataConnection.getCacheSize(), is(settings.getPageSpan()));
 
         assertThat(activityRule.getActivity().recyclerView.getAdapter(), instanceOf(RxPagedAdapter.class));
         RxPagedAdapter<DataItem, ?> adapter = (RxPagedAdapter<DataItem, ?>) activityRule.getActivity().recyclerView.getAdapter();
+        checkDataOnAdapter(settings, adapter);
 
+
+        /*int decissionPageThreshold = (settings.getPageSpan() - 1) / 2;
+        if (decissionPageThreshold > 1) {
+            // scroll not enough pages to make requests...
+            onView(withId(R.id.recycler))
+                    .perform(scrollToPosition((decissionPageThreshold - 1) * settings.getPageSize()));
+
+            Thread.sleep(2000);
+            checkDataOnAdapter(settings, adapter);
+
+            DataItem first = adapter.getItem(0);
+            assertThat(first.getOwnerPage(), is(0)); // ensure we have not moved forward
+        }*/
+
+        helper.configureCountDown(1);
+        // scroll one more page forward...
+//        int targetPos = decissionPageThreshold * settings.getPageSize();
+        int targetPos = adapter.getTotalCount();
+        onView(withId(R.id.recycler)).perform(scrollToPosition(targetPos));
+        countEnded = helper.awaitCountdown(4);
+        assertThat(countEnded, is(true));
+
+        assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan() + 1));
+        assertThat(dataConnection.getDiskPages(), is(0));
+        assertThat(dataConnection.getCacheSize(), is(settings.getPageSpan() + 1));
+        checkDataOnAdapter(settings, adapter);
+        DataItem first = adapter.getItem(0);
+        assertThat(first.getOwnerPage(), not(0)); // ensure we have not moved forward
+
+    }
+
+    private void checkDataOnAdapter(Settings settings, RxPagedAdapter<DataItem, ?> adapter) {
         // ensure adapter has settings pages * size items
         assertThat(adapter.getTotalCount(), is(settings.getPageSize() * settings.getPageSpan()));
 
@@ -92,7 +128,6 @@ public class MainActivityTest {
             orderMather.add(dataItemAtIdx(i));
         }
         assertThat(diList, contains(orderMather));
-
     }
 
     private static Matcher<DataItem> dataItemAtIdx(final int idx) {

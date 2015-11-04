@@ -26,12 +26,14 @@ public class MainActivity extends BaseActivity {
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         adapter = new TestAdapter(getComponent().getRxSettings(), savedInstanceState);
         recyclerView.setAdapter(adapter);
+        beginBindingData();
     }
 
     @Override
     protected void onPostCreate(@Nullable Bundle savedInstanceState) {
         super.onPostCreate(savedInstanceState);
     }
+
 
     public void beginBindingData() {
         getComponent().getDataConnection().connectWith(adapter);

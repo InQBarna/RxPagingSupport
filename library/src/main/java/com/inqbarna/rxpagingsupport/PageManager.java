@@ -197,6 +197,7 @@ public class PageManager<T> {
     private Observer<? super Page<T>> pageIncomeObserver = new Observer<Page<T>>() {
         @Override
         public void onCompleted() {
+            settings.getLogger().debug("Source completed, acknowledge last pate", null);
             acknowledgeLastPage();
             clearPendingRequests();
             activeReceptionSubscription = null;
@@ -271,6 +272,14 @@ public class PageManager<T> {
             this.to = to;
         }
 
+        private IdxRange(int single) {
+            if (single < 0) {
+                throw new IllegalArgumentException("Index may not be smaller than 0");
+            }
+            this.from = single;
+            this.to = single;
+        }
+
         boolean fitsInside(int pos) {
             return pos >= from && pos <= to;
         }
@@ -280,7 +289,7 @@ public class PageManager<T> {
         }
 
         static IdxRange needle(int searchIdx) {
-            return new IdxRange(searchIdx, searchIdx);
+            return new IdxRange(searchIdx);
         }
 
         @Override
@@ -346,6 +355,7 @@ public class PageManager<T> {
         PageInfo<T> newPage;
         try {
             if (page.isEmpty()) {
+                settings.getLogger().debug("empty page " + page + ", acknowledge last page", null);
                 acknowledgeLastPage();
                 return;
             }
@@ -446,7 +456,10 @@ public class PageManager<T> {
     }
 
     private void applyOffsetToItemsFrom(PageInfo<T> floor, int offsetSize) {
-        List<PageInfo<T>> aboveFloor = new ArrayList<>(pages.tailSet(floor, false).descendingSet());
+        if (offsetSize == 0)
+            return; // nothing to do
+        NavigableSet<PageInfo<T>> tailInfos = pages.tailSet(floor, false);
+        List<PageInfo<T>> aboveFloor = new ArrayList<>(offsetSize > 0 ? tailInfos.descendingSet() : tailInfos);
         for (PageInfo<T> pi : aboveFloor) {
             offsetPage(pi, offsetSize);
         }
@@ -541,12 +554,14 @@ public class PageManager<T> {
             throw new IllegalStateException("You are already registeringMovement... disableMovementDetection first from old view");
         }
         checkNoDisposed();
+        settings.getLogger().debug("Enabling scroll listener for movement detection", null);
         view.addOnScrollListener(scrollListener);
         registeringMovement = true;
     }
 
     public void disableMovementDetection(RecyclerView view) {
         if (registeringMovement) {
+            settings.getLogger().debug("Disabling scroll listener for movement detection", null);
             view.removeOnScrollListener(scrollListener);
             registeringMovement = false;
         }
@@ -555,6 +570,8 @@ public class PageManager<T> {
     public void recycle() {
         if (!disposed) {
             disposed = true;
+            settings.getLogger().debug("Disposing Page manager", null);
+
             dispatchToSubject(
                     new Action0() {
                         @Override
@@ -584,6 +601,7 @@ public class PageManager<T> {
 
         @Override
         public void onScrollStateChanged(RecyclerView recyclerView, int newState) {
+            settings.getLogger().debug("Scroll state change detected: " + newState, null);
             switch (newState) {
                 case RecyclerView.SCROLL_STATE_SETTLING:
                     if (myState == WAIT && null != activeReceptionSubscription) {
@@ -604,15 +622,16 @@ public class PageManager<T> {
 
         @Override
         public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
+            settings.getLogger().debug("Scroll detected dy = " + dy, null);
             if (myState == GET_DIRECTION) {
                 if (dy > 0) {
                     // we're scrolling up
                     myState = SETTLE_DOWN;
-                    onMovingUp(recyclerView);
+                    onMovingDown(recyclerView);
                 } else if (dy < 0) {
                     // we're scrolling down
                     myState = SETTLE_DOWN;
-                    onMovingDown(recyclerView);
+                    onMovingUp(recyclerView);
                 } else {
                     settings.getLogger().info("Can't get movement direction, dy = 0", null);
                 }

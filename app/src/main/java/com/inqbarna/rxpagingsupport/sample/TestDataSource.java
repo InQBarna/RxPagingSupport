@@ -1,5 +1,8 @@
 package com.inqbarna.rxpagingsupport.sample;
 
+import android.util.Log;
+import android.util.SparseArray;
+
 import com.inqbarna.rxpagingsupport.Page;
 import com.inqbarna.rxpagingsupport.PageRequest;
 import com.inqbarna.rxpagingsupport.RxStdDispatcher;
@@ -7,6 +10,7 @@ import com.inqbarna.rxpagingsupport.Source;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
@@ -32,10 +36,16 @@ public class TestDataSource {
         }
     };
 
+    private SparseArray<List<DataItem>> cachedPages = new SparseArray<>();
+
     private RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager = new RxStdDispatcher.RxPageCacheManager<DataItem>() {
         @Override
         public void storePage(Page<DataItem> page) {
-            // nothing yet
+            try {
+                cachedPages.put(page.getOffset(), page.getItems());
+            } catch (Throwable throwable) {
+                Log.e("TEST", "Error caching page", throwable);
+            }
         }
 
         @Override
@@ -74,18 +84,24 @@ public class TestDataSource {
         for (int i = request.getOffset(); i <= request.getEnd(); i++) {
             items.add(new DataItem(request.getPage(), i));
         }
-        return new Page<DataItem>(request.getPage(), request.getOffset(), source, items);
+        return new Page<>(request.getPage(), request.getOffset(), source, items);
     }
 
     private Observable<? extends Page<DataItem>> processDiskRequest(PageRequest pageRequest) {
-        return Observable.just(generatePage(pageRequest, Source.Cache)).doOnNext(
-                new Action1<Page<DataItem>>() {
-                    @Override
-                    public void call(Page<DataItem> dataItemPage) {
-                        accountDiskPage(dataItemPage);
-                    }
-                }
-        );
+        List<DataItem> items = cachedPages.get(pageRequest.getOffset());
+        if (null == items) {
+            return Observable.error(new NoSuchElementException("There's no that item cached"));
+        } else {
+            return Observable.just(new Page<>(pageRequest.getPage(), pageRequest.getOffset(), Source.Cache, items))
+                    .doOnNext(
+                            new Action1<Page<DataItem>>() {
+                                @Override
+                                public void call(Page<DataItem> dataItemPage) {
+                                    accountDiskPage(dataItemPage);
+                                }
+                            }
+                    );
+        }
     }
 
     private void accountNewNetworkPage(Page<DataItem> dataItemPage) {
@@ -107,6 +123,10 @@ public class TestDataSource {
                                      }
                                  }
                          );
+    }
+
+    public int getCacheSize() {
+        return cachedPages.size();
     }
 
     private void accountDiskPage(Page<DataItem> dataItemPage) {

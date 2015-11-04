@@ -26,6 +26,8 @@ import rx.Observable;
 @Module
 public class DataModule {
 
+    private TestDataSource tds = new TestDataSource();
+
     @Provides
     @Singleton
     public DataConnection<DataItem> provideDataConnection(final RxPageDispatcher<DataItem> dataConnection) {
@@ -46,28 +48,13 @@ public class DataModule {
     @Provides
     @Singleton
     public RxStdDispatcher.RxPageSource<DataItem> providePageSource() {
-        return new RxStdDispatcher.RxPageSource<DataItem>() {
-            @Override
-            public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
-                return Observable.error(new UnsupportedOperationException("Not yet")); // TODO: 4/11/15 something mor interesting?
-            }
-        };
+        return tds.getNetSource();
     }
 
     @Provides
     @Singleton
     public RxStdDispatcher.RxPageCacheManager<DataItem> provideCacheManager() {
-        return new RxStdDispatcher.RxPageCacheManager<DataItem>() {
-            @Override
-            public void storePage(Page<DataItem> page) {
-                // no-op
-            }
-
-            @Override
-            public Observable<? extends Page<DataItem>> processRequest(PageRequest pageRequest) {
-                return Observable.error(new UnsupportedOperationException("Not yet"));
-            }
-        };
+        return tds.getCacheManager();
     }
 
     @Provides
