@@ -8,8 +8,10 @@ import android.support.test.rule.ActivityTestRule;
  * @version 1.0 3/11/15
  */
 public class InjectedActivityTestRule<T extends Activity> extends ActivityTestRule<T> {
-
-    private GlobalsComponent component;
+    public InjectedActivityTestRule(Class<T> activityClass) {
+        super(activityClass);
+    }
+    /* private GlobalsComponent component;
     private TestDataSource dataConnection;
 
 
@@ -34,5 +36,5 @@ public class InjectedActivityTestRule<T extends Activity> extends ActivityTestRu
 
     public TestDataSource getDataConnection() {
         return dataConnection;
-    }
+    }*/
 }

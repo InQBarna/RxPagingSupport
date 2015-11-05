@@ -17,4 +17,6 @@ public interface GlobalsComponent {
     DataConnection<DataItem> getDataConnection();
 
     Settings getRxSettings();
+
+    boolean shouldAutoConnect();
 }

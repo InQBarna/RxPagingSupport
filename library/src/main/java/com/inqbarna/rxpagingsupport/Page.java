@@ -18,6 +18,12 @@ public class Page<T> {
 
     private Throwable error;
 
+    public interface PageRecycler<T> {
+        void onRecycled(Page<T> page);
+    }
+
+    private PageRecycler<T> pageRecycler;
+
     public Page(int page, int offset, Source source) {
         // this is, for last page...
 
@@ -32,6 +38,7 @@ public class Page<T> {
         this.source = source;
         this.items = new ArrayList<>(items);
         this.size = this.items.size();
+        this.pageRecycler = null;
     }
 
     public Page(int page, Source source, Throwable error) {
@@ -39,6 +46,11 @@ public class Page<T> {
         this.page = page;
         this.offset = -1; // not important
         this.source = source;
+        this.pageRecycler = null;
+    }
+
+    public void setPageRecycler(PageRecycler<T> recycler) {
+        this.pageRecycler = recycler;
     }
 
     public int getPage() {
@@ -73,5 +85,11 @@ public class Page<T> {
     public boolean isEmpty() throws Throwable {
         checkError();
         return size == 0;
+    }
+
+    public void recycle() {
+        if (null != pageRecycler) {
+            pageRecycler.onRecycled(this);
+        }
     }
 }

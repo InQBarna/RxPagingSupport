@@ -1,6 +1,8 @@
 package com.inqbarna.rxpagingsupport.sample;
 
+import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.assertion.ViewAssertions;
+import android.support.test.rule.ActivityTestRule;
 import android.support.test.runner.AndroidJUnit4;
 import android.util.Log;
 
@@ -10,6 +12,7 @@ import com.inqbarna.rxpagingsupport.Settings;
 
 import org.hamcrest.CustomTypeSafeMatcher;
 import org.hamcrest.Matcher;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,24 +39,30 @@ import static org.hamcrest.Matchers.not;
 @RunWith(AndroidJUnit4.class)
 public class MainActivityTest {
 
-    @Rule
-    public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
+    //    @Rule
+    //    public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
+    @Rule public ActivityTestRule<MainActivity> activityRule = new ActivityTestRule<MainActivity>(MainActivity.class, false, false);
 
-//    @Test
-    public void simpleTest() {
-        onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
+    TestDataSource testDataSource;
+
+    @Before
+    public void doBefore() {
+        testDataSource = new TestDataSource();
+        App.get(InstrumentationRegistry.getTargetContext()).setDataModule(new TestDataModule(testDataSource.getNetSource(), testDataSource.getCacheManager()));
     }
 
     @Test
     public void testLoadingShown() throws InterruptedException {
-
+        activityRule.launchActivity(null);
         onView(withId(R.id.recycler)).check(ViewAssertions.matches(hasDescendant(allOf(withId(R.id.progress), isDisplayed()))));
 
-        Settings settings = activityRule.getComponent().getRxSettings();
+        MainActivity activity = activityRule.getActivity();
+
+        Settings settings = activity.getComponent().getRxSettings();
         final TestAsyncHelper helper = new TestAsyncHelper();
         helper.configureCountDown(settings.getPageSpan());
 
-        TestDataSource dataConnection = activityRule.getDataConnection();
+        TestDataSource dataConnection = testDataSource;
         dataConnection.setDataSourceListener(
                 new TestDataSource.DataSourceListener() {
                     @Override
@@ -83,51 +92,43 @@ public class MainActivityTest {
 
         assertThat(activityRule.getActivity().recyclerView.getAdapter(), instanceOf(RxPagedAdapter.class));
         RxPagedAdapter<DataItem, ?> adapter = (RxPagedAdapter<DataItem, ?>) activityRule.getActivity().recyclerView.getAdapter();
-        checkDataOnAdapter(settings, adapter);
+        checkDataOnAdapter(settings, adapter, 0);
 
 
-        /*int decissionPageThreshold = (settings.getPageSpan() - 1) / 2;
-        if (decissionPageThreshold > 1) {
-            // scroll not enough pages to make requests...
-            onView(withId(R.id.recycler))
-                    .perform(scrollToPosition((decissionPageThreshold - 1) * settings.getPageSize()));
+        int decissionPageThreshold = (settings.getPageSpan() - 1) / 2;
 
-            Thread.sleep(2000);
-            checkDataOnAdapter(settings, adapter);
+        helper.configureCountDown(decissionPageThreshold);
 
-            DataItem first = adapter.getItem(0);
-            assertThat(first.getOwnerPage(), is(0)); // ensure we have not moved forward
-        }*/
-
-        helper.configureCountDown(1);
-        // scroll one more page forward...
-//        int targetPos = decissionPageThreshold * settings.getPageSize();
+        // scroll to last...
         int targetPos = adapter.getTotalCount();
         onView(withId(R.id.recycler)).perform(scrollToPosition(targetPos));
+
         countEnded = helper.awaitCountdown(4);
         assertThat(countEnded, is(true));
 
-        assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan() + 1));
+//        InstrumentationRegistry.getInstrumentation().waitForIdle(new EmptyRunnable());
+
+        assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan() + decissionPageThreshold));
         assertThat(dataConnection.getDiskPages(), is(0));
-        assertThat(dataConnection.getCacheSize(), is(settings.getPageSpan() + 1));
-        checkDataOnAdapter(settings, adapter);
+        assertThat(dataConnection.getCacheSize(), is(settings.getPageSpan() + decissionPageThreshold));
+        checkDataOnAdapter(settings, adapter, decissionPageThreshold * settings.getPageSize());
         DataItem first = adapter.getItem(0);
         assertThat(first.getOwnerPage(), not(0)); // ensure we have not moved forward
 
     }
 
-    private void checkDataOnAdapter(Settings settings, RxPagedAdapter<DataItem, ?> adapter) {
+    private void checkDataOnAdapter(Settings settings, RxPagedAdapter<DataItem, ?> adapter, int firstExpectedIdx) {
         // ensure adapter has settings pages * size items
         assertThat(adapter.getTotalCount(), is(settings.getPageSize() * settings.getPageSpan()));
 
         // check they're ordered....
         List<DataItem> diList = new ArrayList<>();
-        List<Matcher<? super DataItem>> orderMather = new ArrayList<>();
+        List<Matcher<? super DataItem>> orderMatcher = new ArrayList<>();
         for (int i = 0; i < adapter.getTotalCount(); i++) {
             diList.add(adapter.getItem(i));
-            orderMather.add(dataItemAtIdx(i));
+            orderMatcher.add(dataItemAtIdx(firstExpectedIdx + i));
         }
-        assertThat(diList, contains(orderMather));
+        assertThat(diList, contains(orderMatcher));
     }
 
     private static Matcher<DataItem> dataItemAtIdx(final int idx) {
@@ -138,4 +139,5 @@ public class MainActivityTest {
             }
         };
     }
+
 }

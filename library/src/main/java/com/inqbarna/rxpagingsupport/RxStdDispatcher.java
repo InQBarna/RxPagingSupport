@@ -13,19 +13,19 @@ import rx.functions.Func1;
 public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
 
     // PRE: one or the other sources will be non-null
-    private final RxPageSource<T>     networkSource;
-    private final RxPageSource<T>     diskSource;
-    private final RxPageCacheStore<T> cacheStore;
-    private final Settings            settings;
+    protected final RxPageSource<T>     networkSource;
+    protected final RxPageSource<T>     diskSource;
+    protected final RxPageCacheStore<T> cacheStore;
+    protected final Settings            settings;
 
-    private RxStdDispatcher(@NonNull Settings settings, @NonNull RxPageSource<T> networkSource, @Nullable RxPageSource<T> diskSource) {
+    protected RxStdDispatcher(@NonNull Settings settings, @NonNull RxPageSource<T> networkSource, @Nullable RxPageSource<T> diskSource) {
         this.networkSource = networkSource;
         this.diskSource = diskSource;
         this.settings = settings;
         this.cacheStore = null;
     }
 
-    private RxStdDispatcher(@NonNull Settings settings, @NonNull RxPageCacheManager<T> cacheManager, @Nullable RxPageSource<T> networkSource) {
+    protected RxStdDispatcher(@NonNull Settings settings, @NonNull RxPageCacheManager<T> cacheManager, @Nullable RxPageSource<T> networkSource) {
         this.settings = settings;
         this.diskSource = cacheManager;
         this.cacheStore = cacheManager;
@@ -71,7 +71,7 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
         }
     }
 
-    private Observable<? extends Page<T>> processDiskRequest(PageRequest pageRequest, boolean failIfNoSource) {
+    protected Observable<? extends Page<T>> processDiskRequest(PageRequest pageRequest, boolean failIfNoSource) {
         if (null == diskSource) {
             if (failIfNoSource) {
                 return Observable.error(new RxPagingException("Error in disk request (" + pageRequest + ") and no source defined", pageRequest));
@@ -83,7 +83,7 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
         }
     }
 
-    private Observable<? extends Page<T>> processNetRequest(final PageRequest pageRequest) {
+    protected Observable<? extends Page<T>> processNetRequest(final PageRequest pageRequest) {
         final boolean diskFallback = settings.hasCacheFallbackEnabled();
         if (null == networkSource) {
             if (diskFallback) {

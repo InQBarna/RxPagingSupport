@@ -26,7 +26,9 @@ public class MainActivity extends BaseActivity {
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         adapter = new TestAdapter(getComponent().getRxSettings(), savedInstanceState);
         recyclerView.setAdapter(adapter);
-        beginBindingData();
+        if (getComponent().shouldAutoConnect()) {
+            beginBindingData();
+        }
     }
 
     @Override

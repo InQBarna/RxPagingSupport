@@ -14,7 +14,7 @@ public class BaseActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setComponent(DaggerGlobalsComponent.builder().dataModule(new DataModule()).build());
+        setComponent(DaggerGlobalsComponent.builder().dataModule(App.getDataModule(this)).build());
     }
 
     public GlobalsComponent getComponent() {

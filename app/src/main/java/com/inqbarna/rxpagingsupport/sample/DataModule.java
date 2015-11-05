@@ -41,6 +41,12 @@ public class DataModule {
 
     @Provides
     @Singleton
+    public boolean autoConnect() {
+        return true;
+    }
+
+    @Provides
+    @Singleton
     public RxPageDispatcher<DataItem> provideRxDataConnection(Settings settings, RxStdDispatcher.RxPageSource<DataItem> netSource, RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager) {
         return RxStdDispatcher.newInstance(settings, cacheManager, netSource);
     }

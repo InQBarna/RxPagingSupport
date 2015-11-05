@@ -18,6 +18,10 @@ public class TestDataModule extends DataModule {
         this.cacheManager = cacheManager;
     }
 
+    @Override
+    public boolean autoConnect() {
+        return false;
+    }
 
     @Override
     public RxStdDispatcher.RxPageSource<DataItem> providePageSource() {

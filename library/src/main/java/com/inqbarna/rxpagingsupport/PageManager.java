@@ -216,6 +216,7 @@ public class PageManager<T> {
         public void onNext(Page<T> tPage) {
             removePendigRequest(tPage.getPage());
             addPage(tPage);
+            tPage.recycle(); // after added, release any resource...
         }
     };
 
@@ -555,6 +556,7 @@ public class PageManager<T> {
         }
         checkNoDisposed();
         settings.getLogger().debug("Enabling scroll listener for movement detection", null);
+        scrollListener.resetState();
         view.addOnScrollListener(scrollListener);
         registeringMovement = true;
     }
@@ -570,6 +572,7 @@ public class PageManager<T> {
     public void recycle() {
         if (!disposed) {
             disposed = true;
+            scrollListener.resetState();
             settings.getLogger().debug("Disposing Page manager", null);
 
             dispatchToSubject(
@@ -593,10 +596,18 @@ public class PageManager<T> {
         final int GET_DIRECTION = 1;
         final int SETTLE_DOWN = 2;
 
+        private final int DOWN = 1;
+        private final int UP = 2;
+        private final int NONE = 0;
+
+        private int direction = NONE;
         private int myState = WAIT; // initial state
+
+        private long absDisplacement = 0;
 
         void resetState() {
             myState = WAIT;
+            direction = NONE;
         }
 
         @Override
@@ -604,17 +615,27 @@ public class PageManager<T> {
             settings.getLogger().debug("Scroll state change detected: " + newState, null);
             switch (newState) {
                 case RecyclerView.SCROLL_STATE_SETTLING:
-                    if (myState == WAIT && null != activeReceptionSubscription) {
+                    if (myState == GET_DIRECTION) {
+                        myState = SETTLE_DOWN;
+                    } else if (myState == WAIT && null != activeReceptionSubscription) {
                         myState = GET_DIRECTION;
                     }
                     break;
                 case RecyclerView.SCROLL_STATE_IDLE:
-                    if (myState == SETTLE_DOWN) {
+                    if (myState != WAIT) {
                         myState = WAIT;
+                        if (absDisplacement > 0) {
+                            onMovingDown(recyclerView);
+                        } else if (absDisplacement < 0) {
+                            onMovingUp(recyclerView);
+                        }
                     }
                     break;
                 case RecyclerView.SCROLL_STATE_DRAGGING:
-                    myState = WAIT;
+                    if (myState == WAIT && null != activeReceptionSubscription) {
+                        absDisplacement = 0;
+                        myState = GET_DIRECTION;
+                    }
                 default:
                     // no-op
             }
@@ -624,17 +645,18 @@ public class PageManager<T> {
         public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
             settings.getLogger().debug("Scroll detected dy = " + dy, null);
             if (myState == GET_DIRECTION) {
-                if (dy > 0) {
-                    // we're scrolling up
-                    myState = SETTLE_DOWN;
-                    onMovingDown(recyclerView);
-                } else if (dy < 0) {
-                    // we're scrolling down
-                    myState = SETTLE_DOWN;
-                    onMovingUp(recyclerView);
-                } else {
-                    settings.getLogger().info("Can't get movement direction, dy = 0", null);
-                }
+                absDisplacement += dy;
+//                if (dy > 0) {
+//                    // we're scrolling up
+//                    myState = SETTLE_DOWN;
+//                    onMovingDown(recyclerView);
+//                } else if (dy < 0) {
+//                    // we're scrolling down
+//                    myState = SETTLE_DOWN;
+//                    onMovingUp(recyclerView);
+//                } else {
+//                    settings.getLogger().info("Can't get movement direction, dy = 0", null);
+//                }
             }
         }
 
@@ -643,35 +665,57 @@ public class PageManager<T> {
             if (nChilds == 0) {
                 return; // should never happen indeed (we can scroll because there are elements!)
             }
+
+            final int hidenItemCount = getTotalCount() - nChilds;
+            if (hidenItemCount < settings.getPageSize()) {
+                throw new IllegalStateException("Configured page size * span is too small, and fits in window (" + settings.getPageSize() + " * " + settings.getPageSpan() + ")");
+            }
+
+            final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final int firstChildPos = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(0));
             final int numSidePages = (settings.getPageSpan() - 1) / 2;
-            final IdxRange ceilingKey = pageMap.ceilingKey(IdxRange.needle(firstChildPos));
-            // NOTE: ceilingKey must not be null, otherwise we're doing something very bad....
-            final SortedMap<IdxRange, PageInfo<T>> headMap = pageMap.headMap(ceilingKey);
-            if (headMap.size() < numSidePages) {
+            final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(firstChildPos)); // this gives which page first child lives within
+            // NOTE: floorKey must not be null, otherwise we're doing something very bad....
+            final SortedMap<IdxRange, PageInfo<T>> headMap = pageMap.headMap(floorKey, true);
+            if (headMap.size() <= numSidePages) {
                 int reqPage = 0;
                 if (headMap.size() > 0) {
                     final PageInfo<T> firstPage = headMap.get(headMap.firstKey());
                     reqPage = Math.max(0, firstPage.pageNumber - 1);
                 }
-                requestPage(reqPage);
+                int toRenew = Math.min(hidenPagesCount, numSidePages - headMap.size() + 1);
+                while (reqPage >= 0 && toRenew > 0) {
+                    requestPage(reqPage--);
+                    toRenew--;
+                }
             }
         }
 
         private void onMovingDown(RecyclerView recyclerView) {
             final int nChilds = recyclerView.getChildCount();
+            final int hidenItemCount = getTotalCount() - nChilds;
+            if (hidenItemCount < settings.getPageSize()) {
+                throw new IllegalStateException("Configured page size * span is too small, and fits in window (" + settings.getPageSize() + " * " + settings.getPageSpan() + ")");
+            }
+            final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final int lastChild = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(nChilds - 1));
             final int numSidePages = (settings.getPageSpan() - 1) / 2;
             final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(lastChild));
             // NOTE: floorKey must not be null, otherwise we're doing something very bad....
             final SortedMap<IdxRange, PageInfo<T>> tailMap = pageMap.tailMap(floorKey);
-            if (tailMap.size() < numSidePages) {
+            if (tailMap.size() <= numSidePages) {
+                // ok, last item shown is within span renew portion...
+
                 int pageNoRequest = maxPageNumberSeen + 1;
                 if (tailMap.size() > 0) {
                     PageInfo<T> lastPage = tailMap.get(tailMap.lastKey());
                     pageNoRequest = lastPage.pageNumber + 1;
                 }
-                requestPage(pageNoRequest);
+                int toRenew = Math.min(hidenPagesCount, numSidePages - tailMap.size() + 1);
+                while (toRenew > 0) {
+                    requestPage(pageNoRequest++);
+                    toRenew--;
+                }
             }
         }
     }
