@@ -591,6 +591,35 @@ public class PageManager<T> {
         }
     }
 
+    int getNumPages() {
+        return pages.size();
+    }
+
+    int getFirstItemOffset() {
+        if (pages.size() == 0) {
+            return 0;
+        }
+        final PageInfo<T> first = pages.first();
+        return first.globalStartIdx;
+    }
+
+    int getLastItemOffset() {
+        if (pages.size() == 0) {
+            return 0;
+        }
+
+        final PageInfo<T> last = pages.last();
+        return last.globalEndIdx;
+    }
+
+    Source getSourceOfPos(int adapterPosition) {
+        if (adapterPosition >= totalCount) {
+            return null;
+        }
+        IdxRange containingPageRange = pageMap.floorKey(IdxRange.needle(adapterPosition));
+        return pageMap.get(containingPageRange).pageSource;
+    }
+
     private class ManagerScrollListener extends RecyclerView.OnScrollListener {
         final int WAIT = 0;
         final int GET_DIRECTION = 1;

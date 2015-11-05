@@ -29,6 +29,9 @@ public class MainActivity extends BaseActivity {
         if (getComponent().shouldAutoConnect()) {
             beginBindingData();
         }
+
+        recyclerView.addItemDecoration(adapter.newDebugDecoration(recyclerView));
+
     }
 
     @Override

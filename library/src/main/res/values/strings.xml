@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">RxPagingSupport</string>
+    <string name="rx_db_counter_text"># pages: %1$d, Items from: %2$d, to: %3$d (%4$d)</string>
 </resources>
