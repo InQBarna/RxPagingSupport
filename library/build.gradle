@@ -1,7 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'com.github.dcendents.android-maven'
 
-group = 'com.github.inqbarna'
+group = 'com.github.InQBarna'
 
 android {
     compileSdkVersion 23
