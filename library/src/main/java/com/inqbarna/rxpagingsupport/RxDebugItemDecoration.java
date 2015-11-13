@@ -81,12 +81,15 @@ class RxDebugItemDecoration extends RecyclerView.ItemDecoration {
             final View child = parent.getChildAt(i);
             Path path = getPath(child);
             RecyclerView.LayoutParams params = (RecyclerView.LayoutParams) child.getLayoutParams();
-            source = manager.getSourceOfPos(params.getViewAdapterPosition());
-            if (null != source) {
-                c.save();
-                c.translate(layoutManager.getDecoratedRight(child) - pathWidth, layoutManager.getDecoratedTop(child));
-                c.drawPath(path, Source.Network == source ? netPaint : diskPaint);
-                c.restore();
+            final int viewAdapterPosition = params.getViewAdapterPosition();
+            if (RecyclerView.NO_POSITION != viewAdapterPosition) {
+                source = manager.getSourceOfPos(viewAdapterPosition);
+                if (null != source) {
+                    c.save();
+                    c.translate(layoutManager.getDecoratedRight(child) - pathWidth, layoutManager.getDecoratedTop(child));
+                    c.drawPath(path, Source.Network == source ? netPaint : diskPaint);
+                    c.restore();
+                }
             }
         }
 
