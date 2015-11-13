@@ -688,20 +688,9 @@ public class PageManager<T> {
 
         @Override
         public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-            settings.getLogger().debug("Scroll detected dy = " + dy, null);
+//            settings.getLogger().debug("Scroll detected dy = " + dy, null);
             if (myState == GET_DIRECTION) {
                 absDisplacement += dy;
-//                if (dy > 0) {
-//                    // we're scrolling up
-//                    myState = SETTLE_DOWN;
-//                    onMovingDown(recyclerView);
-//                } else if (dy < 0) {
-//                    // we're scrolling down
-//                    myState = SETTLE_DOWN;
-//                    onMovingUp(recyclerView);
-//                } else {
-//                    settings.getLogger().info("Can't get movement direction, dy = 0", null);
-//                }
             }
         }
 
