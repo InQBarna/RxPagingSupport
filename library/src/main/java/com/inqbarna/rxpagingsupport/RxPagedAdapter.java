@@ -40,6 +40,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         manager = new PageManager<>(this, settings, savedInstanceState);
     }
 
+    public Settings getSettings() {
+        return settings;
+    }
+
     public void enableMovementDetection(RecyclerView view) {
         manager.enableMovementDetection(view);
     }
