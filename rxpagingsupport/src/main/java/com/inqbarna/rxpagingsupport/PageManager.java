@@ -294,8 +294,8 @@ public class PageManager<T> {
                 throw new IllegalArgumentException("Index may not be smaller than 0");
             }
 
-            if (to <= from) {
-                throw new IllegalArgumentException("Invalid range size given, cannot be negative or 0 sized");
+            if (to < from) {
+                throw new IllegalArgumentException("Invalid range size given, cannot be negative");
             }
 
             this.from = from;
