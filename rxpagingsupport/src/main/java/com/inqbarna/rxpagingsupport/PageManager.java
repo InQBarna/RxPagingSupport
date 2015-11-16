@@ -714,9 +714,6 @@ public class PageManager<T> {
             }
 
             final int hidenItemCount = getTotalCount() - nChilds;
-            if (hidenItemCount < settings.getPageSize()) {
-                throw new IllegalStateException("Configured page size * span is too small, and fits in window (" + settings.getPageSize() + " * " + settings.getPageSpan() + ")");
-            }
 
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final int firstChildPos = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(0));
@@ -741,9 +738,6 @@ public class PageManager<T> {
         private void onMovingDown(RecyclerView recyclerView) {
             final int nChilds = recyclerView.getChildCount();
             final int hidenItemCount = getTotalCount() - nChilds;
-            if (hidenItemCount < settings.getPageSize()) {
-                throw new IllegalStateException("Configured page size * span is too small, and fits in window (" + settings.getPageSize() + " * " + settings.getPageSpan() + ")");
-            }
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final int lastChild = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(nChilds - 1));
             final int numSidePages = (settings.getPageSpan() - 1) / 2;
