@@ -387,15 +387,15 @@ public class ManagerTest {
             @Override
             public Object answer(InvocationOnMock invocation) throws Throwable {
                 settings.getLogger().debug("Should deliver empty page on source: " + source, null);
-                final Observable<Object> objectObservable = testEmpty();
+                final Observable<?> objectObservable = testEmpty();
                 settings.getLogger().debug("Generated Observable: " + objectObservable.getClass().getName() + "@" + Integer.toHexString(objectObservable.hashCode()), null);
                 return objectObservable;
             }
         };
     }
 
-    private <T> Observable<T> testEmpty() {
-        return Observable.empty();
+    private <T> Observable<? extends Page<T>> testEmpty() {
+        return Observable.just(Page.<T>empty());
 //        return Observable.create(
 //                new Observable.OnSubscribe<T>() {
 //                    @Override

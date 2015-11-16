@@ -115,18 +115,7 @@ public class PageManager<T> {
     public void beginConnection(RxPageDispatcher<T> dispatcher) {
         // TODO: 4/11/15 I'm maintaining original idea of connection manager, but I will probably get rid of that and do what it does right here
         ConnectionManager connectionManager = new ConnectionManager();
-        final Observable<PageRequest> pageRequests = connectionManager.getPageRequests();
-        connectionManager.establishConnection(pageRequests.flatMap(setupEmptyPageDetector(dispatcher)));
-    }
-
-    private Func1<PageRequest, Observable<? extends Page<T>>> setupEmptyPageDetector(final RxPageDispatcher<T> dispatcher) {
-        return new Func1<PageRequest, Observable<? extends Page<T>>>() {
-            @Override
-            public Observable<? extends Page<T>> call(PageRequest pageRequest) {
-                Page<T> defaultPage = Page.empty();
-                return ((Observable<Page<T>>) dispatcher.call(pageRequest)).singleOrDefault(defaultPage);
-            }
-        };
+        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dispatcher));
     }
 
 
@@ -164,13 +153,6 @@ public class PageManager<T> {
     private ManagerScrollListener scrollListener = new ManagerScrollListener();
 
     private void requestPage(int pageNo) {
-        // ensure we're not requesting a page already available
-        for (PageInfo<T> infos : pages) {
-            if (infos.pageNumber == pageNo) {
-                return;
-            }
-        }
-
         PageRequest pageRequest = null;
         synchronized (pendingRequests) {
             boolean requestPending = pendingRequests.indexOfKey(pageNo) >= 0;
@@ -182,6 +164,14 @@ public class PageManager<T> {
                 } else {
                     type = PageRequest.Type.Network;
                 }
+
+                // ensure we're not requesting a page already available
+                for (PageInfo<T> infos : pages) {
+                    if (infos.pageNumber == pageNo) {
+                        return;
+                    }
+                }
+
                 pageRequest = PageRequest.createFromPageAndSize(type, pageNo, settings.getPageSize());
                 pendingRequests.put(pageNo, pageRequest);
             }
