@@ -23,9 +23,11 @@ import android.util.SparseArray;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -34,9 +36,11 @@ import java.util.concurrent.TimeUnit;
 import rx.Observable;
 import rx.Observer;
 import rx.Scheduler;
+import rx.Subscriber;
 import rx.Subscription;
 import rx.android.schedulers.AndroidSchedulers;
 import rx.functions.Action0;
+import rx.functions.Func1;
 import rx.subjects.PublishSubject;
 
 /**
@@ -111,8 +115,20 @@ public class PageManager<T> {
     public void beginConnection(RxPageDispatcher<T> dispatcher) {
         // TODO: 4/11/15 I'm maintaining original idea of connection manager, but I will probably get rid of that and do what it does right here
         ConnectionManager connectionManager = new ConnectionManager();
-        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dispatcher));
+        final Observable<PageRequest> pageRequests = connectionManager.getPageRequests();
+        connectionManager.establishConnection(pageRequests.flatMap(setupEmptyPageDetector(dispatcher)));
     }
+
+    private Func1<PageRequest, Observable<? extends Page<T>>> setupEmptyPageDetector(final RxPageDispatcher<T> dispatcher) {
+        return new Func1<PageRequest, Observable<? extends Page<T>>>() {
+            @Override
+            public Observable<? extends Page<T>> call(PageRequest pageRequest) {
+                Page<T> defaultPage = Page.empty();
+                return ((Observable<Page<T>>) dispatcher.call(pageRequest)).singleOrDefault(defaultPage);
+            }
+        };
+    }
+
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
         final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
@@ -122,7 +138,7 @@ public class PageManager<T> {
     }
 
     private void onBoundToIncomes() {
-        deliverMessagesScheduler.createWorker()
+        AndroidSchedulers.mainThread().createWorker()
                 .schedule(
                         new Action0() {
                             @Override
@@ -148,6 +164,13 @@ public class PageManager<T> {
     private ManagerScrollListener scrollListener = new ManagerScrollListener();
 
     private void requestPage(int pageNo) {
+        // ensure we're not requesting a page already available
+        for (PageInfo<T> infos : pages) {
+            if (infos.pageNumber == pageNo) {
+                return;
+            }
+        }
+
         PageRequest pageRequest = null;
         synchronized (pendingRequests) {
             boolean requestPending = pendingRequests.indexOfKey(pageNo) >= 0;

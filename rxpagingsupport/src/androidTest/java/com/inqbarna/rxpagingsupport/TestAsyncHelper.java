@@ -84,6 +84,8 @@ public class TestAsyncHelper {
     }
 
     public void countDown() {
-        countDownLatch.countDown();
+        if (null != countDownLatch) {
+            countDownLatch.countDown();
+        }
     }
 }

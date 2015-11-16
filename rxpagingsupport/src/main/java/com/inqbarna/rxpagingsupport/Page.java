@@ -26,13 +26,18 @@ import java.util.List;
  * @author David García <david.garcia@inqbarna.com>
  */
 public class Page<T> {
+
     private final int page;
+
     private final int offset;
     private final Source source;
     private int size;
     private List<T> items;
-
     private Throwable error;
+
+    public static <T> Page<T> empty() {
+        return new Page<>();
+    }
 
     public interface PageRecycler<T> {
         void onRecycled(Page<T> page);
@@ -65,6 +70,16 @@ public class Page<T> {
         this.pageRecycler = null;
     }
 
+    private Page() {
+        this.error = null;
+        this.page = -1;
+        this.offset = -1;
+        this.source = Source.Cache;
+        this.pageRecycler = null;
+        this.size = 0;
+        this.items = Collections.emptyList();
+    }
+
     public void setPageRecycler(PageRecycler<T> recycler) {
         this.pageRecycler = recycler;
     }
@@ -76,6 +91,10 @@ public class Page<T> {
     public int getOffset() throws Throwable {
         checkError();
         return offset;
+    }
+
+    public boolean hasError() {
+        return null != error;
     }
 
     public Source getSource() {

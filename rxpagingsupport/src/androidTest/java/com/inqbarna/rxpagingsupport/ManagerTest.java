@@ -19,6 +19,7 @@ package com.inqbarna.rxpagingsupport;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
+import android.support.test.rule.DisableOnAndroidDebug;
 import android.support.test.runner.AndroidJUnit4;
 import android.support.v7.widget.RecyclerView;
 import android.util.Log;
@@ -27,23 +28,22 @@ import android.view.ViewGroup;
 
 import org.hamcrest.CustomTypeSafeMatcher;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TestRule;
+import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.mockito.stubbing.OngoingStubbing;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
-import rx.Scheduler;
-import rx.android.schedulers.AndroidSchedulers;
-import rx.functions.Action0;
-import rx.functions.Action1;
 import rx.functions.Func1;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -54,11 +54,12 @@ import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.sameInstance;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
-import static org.mockito.Matchers.isNotNull;
+import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -72,22 +73,35 @@ public class ManagerTest {
 
     public static final int             PAGE_SPAN = 5;
     public static final int             PAGE_SIZE = 10;
+    public static final String          TAG       = "RxLibTest";
     private             Settings.Logger logger    = new Settings.Logger() {
         @Override
         public void error(@NonNull String msg, @Nullable Throwable throwable) {
-            Log.e("RxLibTest", msg, throwable);
+            Log.e(TAG, decorateMessage(msg), throwable);
         }
 
         @Override
         public void info(@NonNull String msg, @Nullable Throwable throwable) {
-            Log.i("RxLibTest", msg, throwable);
+            Log.i(TAG, decorateMessage(msg), throwable);
         }
 
         @Override
         public void debug(@NonNull String msg, @Nullable Throwable throwable) {
-            Log.d("RxLibTest", msg, throwable);
+            Log.d(TAG, decorateMessage(msg), throwable);
         }
     };
+
+    @NonNull
+    private static String decorateMessage(@NonNull String msg) {
+        StringBuilder builder = new StringBuilder();
+        final Thread thread = Thread.currentThread();
+        builder.append(thread.getName()).append("(").append(thread.getId()).append(") => ").append(msg);
+        return builder.toString();
+    }
+
+    @Rule
+    public TestRule rule = new DisableOnAndroidDebug(new Timeout(20, TimeUnit.SECONDS));
+
     private Settings        settings;
     private TestAsyncHelper netAsyncHelper;
     private TestAsyncHelper diskAsyncHelper;
@@ -99,13 +113,17 @@ public class ManagerTest {
         private Page.PageRecycler<Item> networkRecycler = new Page.PageRecycler<Item>() {
             @Override
             public void onRecycled(Page<Item> page) {
+                Log.d(TAG, decorateMessage("net page recycled: " + page.getPage() + " from: " + page.getSource() + " will countDowns"));
                 netAsyncHelper.countDown();
+                Log.d(TAG, decorateMessage("net after countdown"));
             }
         };
         private Page.PageRecycler<Item> diskRecycler    = new Page.PageRecycler<Item>() {
             @Override
             public void onRecycled(Page<Item> page) {
+                Log.d(TAG, decorateMessage("disk page recycled: " + page.getPage() + " from: " + page.getSource() + " will countDowns"));
                 diskAsyncHelper.countDown();
+                Log.d(TAG, decorateMessage("disk after countdown"));
             }
         };
 
@@ -138,15 +156,15 @@ public class ManagerTest {
         @Override
         protected Observable<? extends Page<Item>> processDiskRequest(PageRequest pageRequest, boolean failIfNoSource) {
             return super.processDiskRequest(pageRequest, failIfNoSource)
-                    .map(
-                            new Func1<Page<Item>, Page<Item>>() {
-                                @Override
-                                public Page<Item> call(Page<Item> itemPage) {
-                                    itemPage.setPageRecycler(diskRecycler);
-                                    return itemPage;
+                        .map(
+                                new Func1<Page<Item>, Page<Item>>() {
+                                    @Override
+                                    public Page<Item> call(Page<Item> itemPage) {
+                                        itemPage.setPageRecycler(diskRecycler);
+                                        return itemPage;
+                                    }
                                 }
-                            }
-                    );
+                        );
         }
     }
 
@@ -202,7 +220,7 @@ public class ManagerTest {
 
 
         doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
-//        doReturn(generateNetPage(0)).when(netSrc.processRequest(targetRequestPage(0)));
+        //        doReturn(generateNetPage(0)).when(netSrc.processRequest(targetRequestPage(0)));
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, null);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
@@ -259,10 +277,94 @@ public class ManagerTest {
 
         assertThat(countedDown, is(true)); // we received numPageAsk notifications
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE)); // size is still the full size
-        verify(netSrc, times(numPageAsk)).processRequest(anyTargetPage()); // two pages requested...
+        verify(netSrc, times(PAGE_SPAN + numPageAsk)).processRequest(anyTargetPage()); // two extra pages requested...
 
         // first item should now be...
         assertThat(manager.getItem(0).absIds, is((numPageAsk * PAGE_SIZE)));
+    }
+
+    @Test
+    public void shouldNotRecyclePages() throws InterruptedException {
+        final TestAdapter adapter = new TestAdapter(settings);
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(pageNumber(PAGE_SPAN));
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(pageNumber(PAGE_SPAN + 1));
+
+        RxStdDispatcher.RxPageSource<Item> diskSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doAnswer(getSourcedPageAnswer(Source.Cache)).when(diskSrc).processRequest(anyTargetPage());
+
+
+        RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, diskSrc);
+        netAsyncHelper.configureCountDown(PAGE_SPAN);
+        manager.beginConnection(dispatcher);
+        boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
+        assertThat(countedDown, is(true));
+        assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE));
+        assertThat(manager.isLastPageSeen(), is(false));
+
+        //        reset(netSrc); // ok, we now have same than basicInitialization... do scroll
+
+        RecyclerView recyclerViewMock = mock(RecyclerView.class);
+        manager.enableMovementDetection(recyclerViewMock);
+
+        ArgumentCaptor<RecyclerView.OnScrollListener> listenerCaptor = ArgumentCaptor.forClass(RecyclerView.OnScrollListener.class);
+        verify(recyclerViewMock).addOnScrollListener(listenerCaptor.capture());
+
+        final RecyclerView.OnScrollListener listenerCaptorValue = listenerCaptor.getValue();
+        assertThat(listenerCaptorValue, notNullValue());
+
+        when(recyclerViewMock.getChildCount()).thenReturn(PAGE_SIZE);
+        when(recyclerViewMock.getChildAt(anyInt())).thenReturn(DUMMY_VIEW);
+        when(recyclerViewMock.getChildAdapterPosition(dummyView())).thenReturn(PAGE_SPAN * PAGE_SIZE); // return the last possible value, should request two new pages
+
+        int numPageAsk = (PAGE_SPAN - 1) / 2;
+        netAsyncHelper.configureCountDown(1);
+        // start the scroll simulation...
+        listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_DRAGGING);
+        listenerCaptorValue.onScrolled(recyclerViewMock, 0, 10);
+        listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_IDLE);
+
+        verify(netSrc, timeout(3000).times(PAGE_SPAN + numPageAsk)).processRequest(anyTargetPage()); // two extra pages requested...
+        Thread.sleep(3000);
+        assertThat(manager.isLastPageSeen(), is(true));
+        assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE)); // size is still the full size
+        assertThat(manager.getItem(0).absIds, is(0)); // should have not discarded any item
+        assertThat(manager.getNumPages(), is(PAGE_SPAN));
+
+
+        when(recyclerViewMock.getChildAdapterPosition(dummyView())).thenReturn(0); // return the smallest element
+
+        // go again scroll up....
+        listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_DRAGGING);
+        listenerCaptorValue.onScrolled(recyclerViewMock, 0, -10);
+        listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_IDLE);
+
+        // ok, disk source should have never been called....
+        Thread.sleep(3000);
+        verify(diskSrc, never()).processRequest(anyTargetPage());
+
+    }
+
+    @Test
+    public void testLastPage() throws InterruptedException {
+        final TestAdapter adapter = new TestAdapter(settings);
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null));
+        verify(netSrc, after(5000).times(PAGE_SPAN)).processRequest(anyTargetPage());
+
+//        final SortedSet<SimpleDebugNotificationListener.NotificationsByObservable<?>> byObservable = simpleListener.getNotificationsByObservable();
+//
+//        TreeSet<SimpleDebugNotificationListener.NotificationsByObservable<?>> tmpSet = new TreeSet<>();
+//        for (SimpleDebugNotificationListener.NotificationsByObservable<?> no : byObservable) {
+//            tmpSet.add(no);
+//            Log.e(TAG, simpleListener.toString(new TreeSet<>(tmpSet)));
+//            tmpSet.clear();
+//        }
+        assertThat(manager.isLastPageSeen(), is(true));
     }
 
     private static View dummyView() {
@@ -280,6 +382,31 @@ public class ManagerTest {
         };
     }
 
+    private Answer getSourcedEmptyPageAnswer(final Source source) {
+        return new Answer() {
+            @Override
+            public Object answer(InvocationOnMock invocation) throws Throwable {
+                settings.getLogger().debug("Should deliver empty page on source: " + source, null);
+                final Observable<Object> objectObservable = testEmpty();
+                settings.getLogger().debug("Generated Observable: " + objectObservable.getClass().getName() + "@" + Integer.toHexString(objectObservable.hashCode()), null);
+                return objectObservable;
+            }
+        };
+    }
+
+    private <T> Observable<T> testEmpty() {
+        return Observable.empty();
+//        return Observable.create(
+//                new Observable.OnSubscribe<T>() {
+//                    @Override
+//                    public void call(Subscriber<? super T> subscriber) {
+//                        settings.getLogger().debug("Empty subscriber just subscribed: " + subscriber.getClass().getName() + "@" + Integer.toHexString(subscriber.hashCode()), null);
+//                        subscriber.onCompleted();
+//                    }
+//                }
+//        );
+    }
+
     private static PageRequest anyTargetPage() {
         return argThat(
                 new CustomTypeSafeMatcher<PageRequest>("matches any page") {
@@ -291,8 +418,15 @@ public class ManagerTest {
         );
     }
 
-    private void addPage(OngoingStubbing<Observable<? extends Page<Item>>> when, Source source, int i) {
-        when.thenReturn(generateSourcedItems(source, i));
+    private static PageRequest pageNumber(final int pageNo) {
+        return argThat(
+                new CustomTypeSafeMatcher<PageRequest>("match page number " + pageNo) {
+                    @Override
+                    protected boolean matchesSafely(PageRequest item) {
+                        return item.getPage() == pageNo;
+                    }
+                }
+        );
     }
 
     private Observable<Page<Item>> generateNetPage(int page) {
@@ -306,7 +440,10 @@ public class ManagerTest {
         for (int i = 0; i < pageSize; i++) {
             items.add(new Item(page, off + i));
         }
-        return Observable.just(new Page<>(page, off, source, items));
+        settings.getLogger().debug("Generating data for page: " + page, null);
+        final Observable<Page<Item>> result = Observable.just(new Page<>(page, off, source, items));
+        settings.getLogger().debug("Result Obs: " + result.getClass().getName() + "@" + Integer.toHexString(result.hashCode()), null);
+        return result;
     }
 
     private static PageRequest targetRequestPage(final int page) {
