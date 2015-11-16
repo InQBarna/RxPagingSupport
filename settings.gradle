@@ -1,1 +1,2 @@
 include ':app', ':rxpagingsupport'
+project(':rxpagingsupport').name = 'RxPagingSupport'
