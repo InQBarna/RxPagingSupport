@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
+import rx.functions.Action0;
 import rx.functions.Func1;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -52,16 +53,19 @@ import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.sameInstance;
+import static org.mockito.Matchers.anyFloat;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -224,7 +228,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, null);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher);
+        manager.beginConnection(dispatcher, null);
 
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
@@ -241,7 +245,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, null);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher);
+        manager.beginConnection(dispatcher, null);
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE));
@@ -298,7 +302,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, diskSrc);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher);
+        manager.beginConnection(dispatcher, null);
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE));
@@ -353,7 +357,7 @@ public class ManagerTest {
         PageManager<Item> manager = new PageManager<>(adapter, settings, null);
         RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
         doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
-        manager.beginConnection(new TestDispatcher(settings, netSrc, null));
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null), null);
         verify(netSrc, after(5000).times(PAGE_SPAN)).processRequest(anyTargetPage());
 
 //        final SortedSet<SimpleDebugNotificationListener.NotificationsByObservable<?>> byObservable = simpleListener.getNotificationsByObservable();
@@ -366,6 +370,46 @@ public class ManagerTest {
 //        }
         assertThat(manager.isLastPageSeen(), is(true));
     }
+
+    @Test
+    public void testFinallyCalledOnError() {
+        final TestAdapter adapter = new TestAdapter(settings);
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doThrow(new NullPointerException("Testing")).when(netSrc).processRequest(anyTargetPage());
+
+        Action0 action = Mockito.mock(Action0.class);
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
+        verify(action, after(3000).times(1)).call();
+    }
+
+    @Test
+    public void testFinallyCalledOnRecycle() {
+        final TestAdapter adapter = new TestAdapter(settings);
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
+
+        Action0 action = Mockito.mock(Action0.class);
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
+        manager.recycle();
+        verify(action, after(3000).times(1)).call();
+        verify(netSrc, never()).processRequest(anyTargetPage());
+    }
+
+    @Test
+    public void testFinallyCalledOnComplete() {
+        final TestAdapter adapter = new TestAdapter(settings);
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(pageNumber(3));
+
+        Action0 action = Mockito.mock(Action0.class);
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
+        verify(action, after(3000).times(1)).call();
+    }
+
 
     private static View dummyView() {
         return argThat(allOf(instanceOf(View.class), sameInstance(DUMMY_VIEW)));

@@ -20,20 +20,15 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
-import com.inqbarna.rxpagingsupport.Page;
-import com.inqbarna.rxpagingsupport.PageRequest;
 import com.inqbarna.rxpagingsupport.RxStdDispatcher;
 import com.inqbarna.rxpagingsupport.RxPageDispatcher;
 import com.inqbarna.rxpagingsupport.RxPagedAdapter;
 import com.inqbarna.rxpagingsupport.Settings;
 
-import java.util.Set;
-
 import javax.inject.Singleton;
 
 import dagger.Module;
 import dagger.Provides;
-import rx.Observable;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -50,7 +45,7 @@ public class DataModule {
         return new DataConnection<DataItem>() {
             @Override
             public void connectWith(RxPagedAdapter<DataItem, ?> adapter) {
-                adapter.beginConnection(dataConnection);
+                adapter.beginConnection(dataConnection, null);
             }
         };
     }

@@ -17,9 +17,12 @@
 package com.inqbarna.rxpagingsupport;
 
 import android.os.Bundle;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
 import android.view.View;
 import android.view.ViewGroup;
+
+import rx.functions.Action0;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -35,9 +38,14 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
     private       PageManager<T> manager;
     private final Settings       settings;
 
-    public RxPagedAdapter(Settings settings, Bundle savedInstanceState) {
+    public RxPagedAdapter(Settings settings, @Nullable Bundle savedInstanceState) {
         this.settings = settings;
         manager = new PageManager<>(this, settings, savedInstanceState);
+        initState(savedInstanceState);
+    }
+
+    private void initState(@Nullable Bundle savedInstanceState) {
+        // TODO: 25/11/15
     }
 
     public Settings getSettings() {
@@ -100,6 +108,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
             settings.getLogger().error(builder.toString(), null);
         }
         return item;
+    }
+
+    public void beginConnection(RxPageDispatcher<T> dispatcher, Action0 onEndAction) {
+        manager.beginConnection(dispatcher, onEndAction);
     }
 
     public void beginConnection(RxPageDispatcher<T> dispatcher) {

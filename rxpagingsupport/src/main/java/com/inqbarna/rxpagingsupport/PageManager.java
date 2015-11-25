@@ -23,11 +23,9 @@ import android.util.SparseArray;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -36,11 +34,9 @@ import java.util.concurrent.TimeUnit;
 import rx.Observable;
 import rx.Observer;
 import rx.Scheduler;
-import rx.Subscriber;
 import rx.Subscription;
 import rx.android.schedulers.AndroidSchedulers;
 import rx.functions.Action0;
-import rx.functions.Func1;
 import rx.subjects.PublishSubject;
 
 /**
@@ -98,32 +94,44 @@ public class PageManager<T> {
         }
     }
 
-    public class ConnectionManager {
-        public Observable<PageRequest> getPageRequests() {
-            return requestsSubject;
-        }
-
-        public void establishConnection(Observable<Page<T>> incomes) {
-            if (null != activeReceptionSubscription) {
-                activeReceptionSubscription.unsubscribe();
-            }
-
-            activeReceptionSubscription = bindToIncomes(incomes);
-        }
-    }
-
     public void beginConnection(RxPageDispatcher<T> dispatcher) {
-        // TODO: 4/11/15 I'm maintaining original idea of connection manager, but I will probably get rid of that and do what it does right here
-        ConnectionManager connectionManager = new ConnectionManager();
-        connectionManager.establishConnection(connectionManager.getPageRequests().flatMap(dispatcher));
+        beginConnection(dispatcher, null);
+    }
+
+    public void beginConnection(RxPageDispatcher<T> dispatcher, Action0 onEndAction) {
+        if (null != activeReceptionSubscription) {
+            activeReceptionSubscription.unsubscribe();
+        }
+
+        activeReceptionSubscription = bindToIncomes(requestsSubject.flatMap(dispatcher), onEndAction);
+        if (null != activeReceptionSubscription) {
+            onBoundToIncomes();
+        }
     }
 
 
-    private Subscription bindToIncomes(Observable<Page<T>> incomes) {
-        final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
-                                              .subscribe(pageIncomeObserver);
-        onBoundToIncomes();
-        return subscription;
+    private Subscription bindToIncomes(Observable<Page<T>> incomes, final Action0 onEndAction) {
+        if (!disposed) {
+            final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
+                                                     .finallyDo(
+                                                             new Action0() {
+                                                                 @Override
+                                                                 public void call() {
+                                                                     if (null != onEndAction) {
+                                                                         onEndAction.call();
+                                                                     }
+                                                                 }
+                                                             }
+                                                     )
+                                                     .subscribe(pageIncomeObserver);
+
+            return subscription;
+        } else {
+            if (null != onEndAction) {
+                onEndAction.call();
+            }
+            return null;
+        }
     }
 
     private void onBoundToIncomes() {
@@ -227,16 +235,16 @@ public class PageManager<T> {
         @Override
         public void onCompleted() {
             settings.getLogger().debug("Source completed, acknowledge last pate", null);
-            acknowledgeLastPage();
-            clearPendingRequests();
             activeReceptionSubscription = null;
+            clearPendingRequests();
+            acknowledgeLastPage(false);
         }
 
         @Override
         public void onError(Throwable e) {
             settings.getLogger().error("Error loading pages", e);
-            acknowledgeLastPage();
             activeReceptionSubscription = null;
+            acknowledgeLastPage(false);
             clearPendingRequests();
             forwardError(e);
         }
@@ -386,7 +394,7 @@ public class PageManager<T> {
         try {
             if (page.isEmpty()) {
                 settings.getLogger().debug("empty page " + page + ", acknowledge last page", null);
-                acknowledgeLastPage();
+                acknowledgeLastPage(true);
                 return;
             }
 
@@ -513,11 +521,21 @@ public class PageManager<T> {
         applyOffsetToItemsFrom(toRemove, -toRemove.getSize());
     }
 
-    private void acknowledgeLastPage() {
+    private void acknowledgeLastPage(boolean fromEmptyPage) {
         if (!lastPageSeen) {
             settings.getLogger().debug("Got last \"empty\" page", null);
             lastPageSeen = true;
             adapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
+            if (fromEmptyPage) {
+                dispatchToSubject(
+                        new Action0() {
+                            @Override
+                            public void call() {
+                                requestsSubject.onCompleted();
+                            }
+                        }
+                );
+            }
         }
     }
 
