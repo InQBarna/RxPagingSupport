@@ -42,7 +42,7 @@ public class TestAdapter extends RxPagedAdapter<DataItem, TestHolder>{
     }
 
     @Override
-    protected void doBindViewHolder(TestHolder holder, int position) {
+    protected void doBindViewHolder(TestHolder holder, DataItem item, int position) {
         holder.bindTo(getItem(position));
     }
 

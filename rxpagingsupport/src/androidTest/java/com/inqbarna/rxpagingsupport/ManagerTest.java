@@ -16,6 +16,8 @@
  */
 package com.inqbarna.rxpagingsupport;
 
+import android.os.Bundle;
+import android.os.Parcel;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.test.InstrumentationRegistry;
@@ -33,9 +35,13 @@ import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
+import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
 import org.mockito.InOrder;
+import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.mockito.MockitoAnnotations;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
@@ -49,15 +55,17 @@ import rx.functions.Func1;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.any;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.sameInstance;
-import static org.mockito.Matchers.anyFloat;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -65,7 +73,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -194,7 +201,7 @@ public class ManagerTest {
         }
 
         @Override
-        protected void doBindViewHolder(DummyHolder holder, int position) {
+        protected void doBindViewHolder(DummyHolder holder, Item item, int position) {
 
         }
 
@@ -411,6 +418,88 @@ public class ManagerTest {
     }
 
 
+    @Mock
+    RxStdDispatcher.RxPageSource<Item> networkSource;
+
+    @Mock
+    RxStdDispatcher.RxPageSource<Item> diskSource;
+
+    @Mock
+    PageManager.PageLoadErrorListener errorListener;
+
+    @Captor
+    ArgumentCaptor<Throwable> throwableCaptor;
+
+    @Test
+    public void restoreRequestAgainOverDisk() {
+
+        MockitoAnnotations.initMocks(this);
+        TestAdapter adapter = new TestAdapter(settings);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(networkSource).processRequest(anyTargetPage());
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(networkSource).processRequest(pageNumber(3));
+        doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(networkSource).processRequest(pageNumber(4));
+        doAnswer(getSourcedPageAnswer(Source.Cache)).when(diskSource).processRequest(anyTargetPage());
+
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+        RxStdDispatcher<Item> dispatcher = RxStdDispatcher.newInstance(settings, networkSource, diskSource);
+
+        manager.beginConnection(dispatcher);
+
+        verify(networkSource, after(3000).atLeast(4)).processRequest(anyTargetPage());
+        verify(diskSource, never()).processRequest(anyTargetPage());
+        Bundle savedInstance = new Bundle();
+        manager.onSaveInstanceState(savedInstance);
+        manager.recycle();
+        Parcel parcel = Parcel.obtain();
+        parcel.writeBundle(savedInstance);
+        parcel.setDataPosition(0);
+        Bundle recoveredState = parcel.readBundle();
+        parcel.recycle();
+        assertThat(savedInstance, not(sameInstance(recoveredState)));
+
+        recoveredState.setClassLoader(manager.getClass().getClassLoader());
+        manager = new PageManager<>(adapter, settings, recoveredState);
+        manager.beginConnection(dispatcher);
+        verify(diskSource, after(3000).times(3)).processRequest(anyTargetPage());
+        assertThat(manager.isLastPageSeen(), is(true));
+        assertThat(manager.getTotalCount(), is(30));
+    }
+
+    @Test
+    public void errorForwardsFromObservable() {
+        MockitoAnnotations.initMocks(this);
+        TestAdapter adapter = new TestAdapter(settings);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(networkSource).processRequest(anyTargetPage());
+        doThrow(new NullPointerException("Hey there, NPE")).when(networkSource).processRequest(pageNumber(4));
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+
+        manager.setErrorListener(errorListener);
+        RxStdDispatcher<Item> dispatcher = RxStdDispatcher.newInstance(settings, networkSource, null);
+        manager.beginConnection(dispatcher);
+        verify(errorListener, after(5000).times(1)).onError(throwableCaptor.capture());
+
+        assertThat(throwableCaptor.getValue(), instanceOf(NullPointerException.class));
+        assertThat(throwableCaptor.getValue().getMessage(), is("Hey there, NPE"));
+    }
+
+    @Test
+    public void errorForwardsFromPage() {
+        MockitoAnnotations.initMocks(this);
+        TestAdapter adapter = new TestAdapter(settings);
+        doAnswer(getSourcedPageAnswer(Source.Network)).when(networkSource).processRequest(anyTargetPage());
+        doAnswer(errorPageAnswer(Source.Network, new NullPointerException("Hey there, NPE"))).when(networkSource).processRequest(pageNumber(4));
+        PageManager<Item> manager = new PageManager<>(adapter, settings, null);
+
+        manager.setErrorListener(errorListener);
+        RxStdDispatcher<Item> dispatcher = RxStdDispatcher.newInstance(settings, networkSource, null);
+        manager.beginConnection(dispatcher);
+        verify(errorListener, after(5000).times(1)).onError(throwableCaptor.capture());
+
+        assertThat(throwableCaptor.getValue(), instanceOf(NullPointerException.class));
+        assertThat(throwableCaptor.getValue().getMessage(), is("Hey there, NPE"));
+    }
+
+
     private static View dummyView() {
         return argThat(allOf(instanceOf(View.class), sameInstance(DUMMY_VIEW)));
     }
@@ -434,6 +523,18 @@ public class ManagerTest {
                 final Observable<?> objectObservable = testEmpty();
                 settings.getLogger().debug("Generated Observable: " + objectObservable.getClass().getName() + "@" + Integer.toHexString(objectObservable.hashCode()), null);
                 return objectObservable;
+            }
+        };
+    }
+
+
+    private Answer errorPageAnswer(final Source source, final Throwable error) {
+        return new Answer() {
+            @Override
+            public Object answer(InvocationOnMock invocation) throws Throwable {
+                PageRequest request = (PageRequest) invocation.getArguments()[0];
+                Page page = new Page(request.getPage(), source, error);
+                return Observable.just(page);
             }
         };
     }

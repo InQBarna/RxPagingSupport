@@ -17,6 +17,7 @@
 package com.inqbarna.rxpagingsupport;
 
 import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
 import android.view.View;
@@ -74,7 +75,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         if (isLastPosition(position)) {
             holder.setLoadingState(true);
         } else {
-            doBindViewHolder(holder, position);
+            T item = getItem(position);
+            if (null != item) {
+                doBindViewHolder(holder, item, position);
+            }
         }
     }
 
@@ -94,19 +98,19 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
 
     protected abstract VH createLoadingViewHolder(ViewGroup parent);
 
-    protected abstract void doBindViewHolder(VH holder, int position);
+    protected abstract void doBindViewHolder(VH holder, @NonNull T item, int position);
     protected abstract VH doCreateViewHolder(ViewGroup parent, int viewType);
 
     public T getItem(int pos) {
         final T item = manager.getItem(pos);
-        if (null == item) {
-            StringBuilder builder = new StringBuilder();
-            builder.append("Will crash on NPE..., no item returned:\n")
-                   .append("Item pos requested: ").append(pos).append("\n")
-                    .append("Total Count: ").append(manager.getTotalCount()).append("\n")
-                    .append("Last seen: ").append(manager.isLastPageSeen());
-            settings.getLogger().error(builder.toString(), null);
-        }
+//        if (null == item) {
+//            StringBuilder builder = new StringBuilder();
+//            builder.append("Will crash on NPE..., no item returned:\n")
+//                   .append("Item pos requested: ").append(pos).append("\n")
+//                    .append("Total Count: ").append(manager.getTotalCount()).append("\n")
+//                    .append("Last seen: ").append(manager.isLastPageSeen());
+//            settings.getLogger().error(builder.toString(), null);
+//        }
         return item;
     }
 

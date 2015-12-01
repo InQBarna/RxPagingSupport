@@ -17,11 +17,14 @@
 package com.inqbarna.rxpagingsupport;
 
 import android.os.Bundle;
+import android.os.Parcel;
+import android.os.Parcelable;
 import android.support.v7.widget.RecyclerView;
 import android.util.SparseArray;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
@@ -51,7 +54,11 @@ public class PageManager<T> {
         }
     };
 
-    private static class PageInfo<T> {
+    public interface PageLoadErrorListener {
+        void onError(Throwable error);
+    }
+
+    private static class PageInfo<T> implements Parcelable {
         IdxRange adapterRange;
         int     pageNumber;
         Source  pageSource;
@@ -59,6 +66,8 @@ public class PageManager<T> {
         int     globalStartIdx;
         int     globalEndIdx;
 
+        private PageInfo() {
+        }
 
         T getItem(int absoluteIdx) {
             return pageItems.get(absoluteIdx - adapterRange.from);
@@ -92,6 +101,48 @@ public class PageManager<T> {
             sb.append('}');
             return sb.toString();
         }
+
+        @Override
+        public int describeContents() {
+            return 0;
+        }
+
+        @Override
+        public void writeToParcel(Parcel dest, int flags) {
+            dest.writeInt(adapterRange.from);
+            dest.writeInt(adapterRange.to);
+            dest.writeInt(pageNumber);
+            dest.writeInt(pageSource.ordinal());
+            dest.writeInt(pageItems.size());
+            dest.writeInt(globalStartIdx);
+            dest.writeInt(globalEndIdx);
+        }
+
+        private PageInfo(Parcel in) {
+            int from = in.readInt();
+            int to = in.readInt();
+            adapterRange = new IdxRange(from, to);
+            pageNumber = in.readInt();
+            int tmpInt = in.readInt();
+            pageSource = Source.values()[tmpInt];
+            tmpInt = in.readInt();
+            pageItems = new ArrayList<>(tmpInt);
+            Collections.fill(pageItems, null);
+            globalStartIdx = in.readInt();
+            globalEndIdx = in.readInt();
+        }
+
+        public static final Creator<PageInfo> CREATOR = new Creator<PageInfo>() {
+            @Override
+            public PageInfo createFromParcel(Parcel source) {
+                return new PageInfo(source);
+            }
+
+            @Override
+            public PageInfo[] newArray(int size) {
+                return new PageInfo[size];
+            }
+        };
     }
 
     public void beginConnection(RxPageDispatcher<T> dispatcher) {
@@ -136,31 +187,35 @@ public class PageManager<T> {
 
     private void onBoundToIncomes() {
         AndroidSchedulers.mainThread().createWorker()
-                .schedule(
-                        new Action0() {
-                            @Override
-                            public void call() {
-                                sendInitialRequests();
-                            }
-                        }, 300, TimeUnit.MILLISECONDS
-                );
+                         .schedule(
+                                 new Action0() {
+                                     @Override
+                                     public void call() {
+                                         sendInitialRequests();
+                                     }
+                                 }, 300, TimeUnit.MILLISECONDS
+                         );
     }
 
     private void sendInitialRequests() {
         if (pages.isEmpty()) {
             int numPagesReq = settings.getPageSpan();
             for (int i = 0; i < numPagesReq; i++) {
-                requestPage(i);
+                requestPage(i, true);
             }
         } else {
-            settings.getLogger().info("Not doing any initial request, lists are not empty", null);
+            // Ok, we must be recovering state... request exactly same pages, from Cache.... (current pages are just placeholders)
+            settings.getLogger().info("Loading pages from saved state, get contents from disk cache", null);
+            for (PageInfo<T> pageInfo : pages) {
+                requestPage(pageInfo.pageNumber, false);
+            }
         }
     }
 
 
     private ManagerScrollListener scrollListener = new ManagerScrollListener();
 
-    private void requestPage(int pageNo) {
+    private void requestPage(int pageNo, boolean checkNotInPages) {
         PageRequest pageRequest = null;
         synchronized (pendingRequests) {
             boolean requestPending = pendingRequests.indexOfKey(pageNo) >= 0;
@@ -174,9 +229,11 @@ public class PageManager<T> {
                 }
 
                 // ensure we're not requesting a page already available
-                for (PageInfo<T> infos : pages) {
-                    if (infos.pageNumber == pageNo) {
-                        return;
+                if (checkNotInPages) {
+                    for (PageInfo<T> infos : pages) {
+                        if (infos.pageNumber == pageNo) {
+                            return;
+                        }
                     }
                 }
 
@@ -290,6 +347,7 @@ public class PageManager<T> {
 
     private final RecyclerView.Adapter        adapter;
     private       PublishSubject<PageRequest> requestsSubject;
+    private       PageLoadErrorListener       errorListener;
 
     private Subscription activeReceptionSubscription;
 
@@ -331,7 +389,6 @@ public class PageManager<T> {
         }
 
         @Override
-
         public boolean equals(Object o) {
             if (this == o) {
                 return true;
@@ -370,6 +427,12 @@ public class PageManager<T> {
         }
     }
 
+    private interface State {
+        String LastSeen      = "pagemanager.lastseen";
+        String MaxPageNumber = "pagemanager.maxpagenumber";
+        String Pages         = "pagemanager.pages";
+    }
+
     public PageManager(RecyclerView.Adapter adapter, Settings settings, Bundle savedInstanceState) {
         this.adapter = adapter;
         this.settings = settings;
@@ -385,7 +448,18 @@ public class PageManager<T> {
         deliverMessagesScheduler = settings.getDeliveryScheduler();
         pendingRequests = new SparseArray<>(5);
 
-        // TODO: 30/10/15 restore state
+        if (null != savedInstanceState) {
+            lastPageSeen = savedInstanceState.getBoolean(State.LastSeen);
+            maxPageNumberSeen = savedInstanceState.getInt(State.MaxPageNumber);
+            final ArrayList<PageInfo<T>> pageInfoStore = savedInstanceState.getParcelableArrayList(State.Pages);
+            numPages = pageInfoStore.size();
+            for (int i = 0, pageInfoStoreSize = pageInfoStore.size(); i < pageInfoStoreSize; i++) {
+                PageInfo<T> pageInfo = pageInfoStore.get(i);
+                totalCount += pageInfo.getSize();
+                pageMap.put(pageInfo.adapterRange, pageInfo);
+                pages.add(pageInfo);
+            }
+        }
     }
 
     public void addPage(Page<T> page) {
@@ -476,6 +550,10 @@ public class PageManager<T> {
         insertPage(newPage, true);
     }
 
+    public synchronized void setErrorListener(PageLoadErrorListener listener) {
+        this.errorListener = listener;
+    }
+
     private void addNewPageAtBegining(PageInfo<T> newPage) {
         if (numPages == settings.getPageSpan()) {
             removeLastPage();
@@ -540,7 +618,14 @@ public class PageManager<T> {
     }
 
     private void forwardError(Throwable throwable) {
-        // TODO: 4/11/15
+        PageLoadErrorListener listener;
+        synchronized (this) {
+            listener = errorListener;
+        }
+
+        if (null != listener) {
+            listener.onError(throwable);
+        }
     }
 
     private int replacePages(PageInfo<T> newPage, PageInfo<T> oldPage) {
@@ -594,7 +679,10 @@ public class PageManager<T> {
     }
 
     public void onSaveInstanceState(Bundle outState) {
-        // TODO: 30/10/15 actually save something
+        outState.putBoolean(State.LastSeen, lastPageSeen);
+        outState.putInt(State.MaxPageNumber, maxPageNumberSeen);
+        ArrayList<PageInfo<T>> pageInfos = new ArrayList<>(pages);
+        outState.putParcelableArrayList(State.Pages, pageInfos);
     }
 
     public void enableMovementDetection(RecyclerView view) {
@@ -668,16 +756,16 @@ public class PageManager<T> {
     }
 
     private class ManagerScrollListener extends RecyclerView.OnScrollListener {
-        final int WAIT = 0;
+        final int WAIT          = 0;
         final int GET_DIRECTION = 1;
-        final int SETTLE_DOWN = 2;
+        final int SETTLE_DOWN   = 2;
 
         private final int DOWN = 1;
-        private final int UP = 2;
+        private final int UP   = 2;
         private final int NONE = 0;
 
         private int direction = NONE;
-        private int myState = WAIT; // initial state
+        private int myState   = WAIT; // initial state
 
         private long absDisplacement = 0;
 
@@ -719,7 +807,7 @@ public class PageManager<T> {
 
         @Override
         public void onScrolled(RecyclerView recyclerView, int dx, int dy) {
-//            settings.getLogger().debug("Scroll detected dy = " + dy, null);
+            //            settings.getLogger().debug("Scroll detected dy = " + dy, null);
             if (myState == GET_DIRECTION) {
                 absDisplacement += dy;
             }
@@ -747,7 +835,7 @@ public class PageManager<T> {
                 }
                 int toRenew = Math.min(hidenPagesCount, numSidePages - headMap.size() + 1);
                 while (reqPage >= 0 && toRenew > 0) {
-                    requestPage(reqPage--);
+                    requestPage(reqPage--, true);
                     toRenew--;
                 }
             }
@@ -772,7 +860,7 @@ public class PageManager<T> {
                 }
                 int toRenew = Math.min(hidenPagesCount, numSidePages - tailMap.size() + 1);
                 while (toRenew > 0) {
-                    requestPage(pageNoRequest++);
+                    requestPage(pageNoRequest++, true);
                     toRenew--;
                 }
             }
