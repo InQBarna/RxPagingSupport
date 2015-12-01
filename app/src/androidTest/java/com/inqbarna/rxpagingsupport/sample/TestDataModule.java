@@ -16,7 +16,9 @@
  */
 package com.inqbarna.rxpagingsupport.sample;
 
+import com.inqbarna.rxpagingsupport.PageManager;
 import com.inqbarna.rxpagingsupport.RxStdDispatcher;
+import com.inqbarna.rxpagingsupport.Settings;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -26,12 +28,23 @@ public class TestDataModule extends DataModule {
 
     private RxStdDispatcher.RxPageSource<DataItem> pageSource;
     private RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager;
+    private PageManager<DataItem> manager;
 
     public TestDataModule(
+            PageManager<DataItem> pageManager,
             RxStdDispatcher.RxPageSource<DataItem> pageSource,
             RxStdDispatcher.RxPageCacheManager<DataItem> cacheManager) {
+        this.manager = pageManager;
         this.pageSource = pageSource;
         this.cacheManager = cacheManager;
+    }
+
+    @Override
+    public PageManager<DataItem> providePageManager(Settings settings) {
+        if (null != manager) {
+            return manager;
+        }
+        return super.providePageManager(settings);
     }
 
     @Override

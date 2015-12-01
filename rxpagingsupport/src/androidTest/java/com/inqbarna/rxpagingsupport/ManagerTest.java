@@ -29,21 +29,29 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.hamcrest.CustomTypeSafeMatcher;
+import org.hamcrest.Matcher;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestRule;
 import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
-import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
+import org.mockito.exceptions.Reporter;
+import org.mockito.internal.invocation.InvocationMatcher;
+import org.mockito.internal.invocation.InvocationsFinder;
+import org.mockito.internal.verification.AtLeast;
+import org.mockito.internal.verification.AtMost;
+import org.mockito.internal.verification.api.VerificationData;
+import org.mockito.invocation.Invocation;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
+import org.mockito.verification.VerificationMode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -52,10 +60,14 @@ import java.util.concurrent.TimeUnit;
 import rx.Observable;
 import rx.functions.Action0;
 import rx.functions.Func1;
+import rx.observers.TestObserver;
+import rx.schedulers.Schedulers;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.allOf;
-import static org.hamcrest.Matchers.any;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsInAnyOrder;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
@@ -64,8 +76,8 @@ import static org.hamcrest.Matchers.sameInstance;
 import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
 import static org.mockito.Mockito.after;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -137,6 +149,7 @@ public class ManagerTest {
                 Log.d(TAG, decorateMessage("disk after countdown"));
             }
         };
+        private TestObserver<PageManager.ManagerEvent> testObserver;
 
         public TestDispatcher(
                 @NonNull Settings settings, @NonNull RxPageSource<Item> networkSource,
@@ -162,6 +175,16 @@ public class ManagerTest {
                                     }
                                 }
                         );
+        }
+
+        @Override
+        public void setEvents(Observable<PageManager.ManagerEvent> events) {
+            testObserver = new TestObserver<>();
+            events.subscribe(testObserver);
+        }
+
+        public TestObserver<PageManager.ManagerEvent> getTestObserver() {
+            return testObserver;
         }
 
         @Override
@@ -219,6 +242,7 @@ public class ManagerTest {
                            .setPageSize(PAGE_SIZE)
                            .setPageSpan(PAGE_SPAN)
                            .setLogger(logger)
+                            .setDeliveryScheduler(Schedulers.immediate())
                            .build();
     }
 
@@ -235,7 +259,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, null);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher, null);
+        manager.beginConnection(dispatcher);
 
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
@@ -252,7 +276,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, null);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher, null);
+        manager.beginConnection(dispatcher);
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE));
@@ -309,7 +333,7 @@ public class ManagerTest {
 
         RxStdDispatcher<Item> dispatcher = new TestDispatcher(settings, netSrc, diskSrc);
         netAsyncHelper.configureCountDown(PAGE_SPAN);
-        manager.beginConnection(dispatcher, null);
+        manager.beginConnection(dispatcher);
         boolean countedDown = netAsyncHelper.awaitCountdown(PAGE_SPAN);
         assertThat(countedDown, is(true));
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE));
@@ -321,7 +345,7 @@ public class ManagerTest {
         manager.enableMovementDetection(recyclerViewMock);
 
         ArgumentCaptor<RecyclerView.OnScrollListener> listenerCaptor = ArgumentCaptor.forClass(RecyclerView.OnScrollListener.class);
-        verify(recyclerViewMock).addOnScrollListener(listenerCaptor.capture());
+        verify(recyclerViewMock, times(1)).addOnScrollListener(listenerCaptor.capture());
 
         final RecyclerView.OnScrollListener listenerCaptorValue = listenerCaptor.getValue();
         assertThat(listenerCaptorValue, notNullValue());
@@ -337,8 +361,7 @@ public class ManagerTest {
         listenerCaptorValue.onScrolled(recyclerViewMock, 0, 10);
         listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_IDLE);
 
-        verify(netSrc, timeout(3000).times(PAGE_SPAN + numPageAsk)).processRequest(anyTargetPage()); // two extra pages requested...
-        Thread.sleep(3000);
+        verify(netSrc, atLeast(PAGE_SPAN + 1)).processRequest(anyTargetPage()); // NOTE: one extra pages requested... (because Schedullers.immediate is used, otherwise... two requests because there's thread shift
         assertThat(manager.isLastPageSeen(), is(true));
         assertThat(manager.getTotalCount(), is(PAGE_SPAN * PAGE_SIZE)); // size is still the full size
         assertThat(manager.getItem(0).absIds, is(0)); // should have not discarded any item
@@ -353,7 +376,6 @@ public class ManagerTest {
         listenerCaptorValue.onScrollStateChanged(recyclerViewMock, RecyclerView.SCROLL_STATE_IDLE);
 
         // ok, disk source should have never been called....
-        Thread.sleep(3000);
         verify(diskSrc, never()).processRequest(anyTargetPage());
 
     }
@@ -364,8 +386,7 @@ public class ManagerTest {
         PageManager<Item> manager = new PageManager<>(adapter, settings, null);
         RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
         doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
-        manager.beginConnection(new TestDispatcher(settings, netSrc, null), null);
-        verify(netSrc, after(5000).times(PAGE_SPAN)).processRequest(anyTargetPage());
+        manager.beginConnection(new TestDispatcher(settings, netSrc, null));
 
 //        final SortedSet<SimpleDebugNotificationListener.NotificationsByObservable<?>> byObservable = simpleListener.getNotificationsByObservable();
 //
@@ -375,33 +396,46 @@ public class ManagerTest {
 //            Log.e(TAG, simpleListener.toString(new TreeSet<>(tmpSet)));
 //            tmpSet.clear();
 //        }
+        Thread.sleep(500); // requests begin to be requested after some time
         assertThat(manager.isLastPageSeen(), is(true));
     }
 
     @Test
-    public void testFinallyCalledOnError() {
+    public void testLastPageCalledOnError() throws InterruptedException {
         final TestAdapter adapter = new TestAdapter(settings);
         PageManager<Item> manager = new PageManager<>(adapter, settings, null);
         RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
         doThrow(new NullPointerException("Testing")).when(netSrc).processRequest(anyTargetPage());
 
-        Action0 action = Mockito.mock(Action0.class);
-        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
-        verify(action, after(3000).times(1)).call();
+        final TestDispatcher dispatcher = new TestDispatcher(settings, netSrc, null);
+        manager.beginConnection(dispatcher);
+        Thread.sleep(500);
+        final List<PageManager.ManagerEvent> events = dispatcher.getTestObserver().getOnNextEvents();
+        assertThat(events, hasItem(event(PageManager.ManagerEventKind.LastPageReceived)));
+    }
+
+    private Matcher<? super PageManager.ManagerEvent> event(final PageManager.ManagerEventKind kind) {
+        return new CustomTypeSafeMatcher<PageManager.ManagerEvent>("Event of kind " + kind) {
+            @Override
+            protected boolean matchesSafely(PageManager.ManagerEvent item) {
+                return item.kind == kind;
+            }
+        };
     }
 
     @Test
-    public void testFinallyCalledOnRecycle() {
+    public void testRecycleEventOnRecycle() {
         final TestAdapter adapter = new TestAdapter(settings);
         PageManager<Item> manager = new PageManager<>(adapter, settings, null);
         RxStdDispatcher.RxPageSource<Item> netSrc = Mockito.mock(RxStdDispatcher.RxPageSource.class);
         doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
 
-        Action0 action = Mockito.mock(Action0.class);
-        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
+        final TestDispatcher dispatcher = new TestDispatcher(settings, netSrc, null);
+        manager.beginConnection(dispatcher);
         manager.recycle();
-        verify(action, after(3000).times(1)).call();
         verify(netSrc, never()).processRequest(anyTargetPage());
+        final List<PageManager.ManagerEvent> events = dispatcher.getTestObserver().getOnNextEvents();
+        assertThat(events, hasItem(event(PageManager.ManagerEventKind.Recycle)));
     }
 
     @Test
@@ -412,9 +446,11 @@ public class ManagerTest {
         doAnswer(getSourcedPageAnswer(Source.Network)).when(netSrc).processRequest(anyTargetPage());
         doAnswer(getSourcedEmptyPageAnswer(Source.Network)).when(netSrc).processRequest(pageNumber(3));
 
-        Action0 action = Mockito.mock(Action0.class);
-        manager.beginConnection(new TestDispatcher(settings, netSrc, null), action);
-        verify(action, after(3000).times(1)).call();
+        final TestDispatcher dispatcher = new TestDispatcher(settings, netSrc, null);
+        manager.beginConnection(dispatcher);
+        verify(netSrc, after(5000).atLeast(1)).processRequest(anyTargetPage());
+        final List<PageManager.ManagerEvent> events = dispatcher.getTestObserver().getOnNextEvents();
+        assertThat(events, hasItem(event(PageManager.ManagerEventKind.LastPageReceived)));
     }
 
 

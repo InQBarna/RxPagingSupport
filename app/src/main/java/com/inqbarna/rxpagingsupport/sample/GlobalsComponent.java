@@ -16,6 +16,7 @@
  */
 package com.inqbarna.rxpagingsupport.sample;
 
+import com.inqbarna.rxpagingsupport.PageManager;
 import com.inqbarna.rxpagingsupport.Settings;
 
 import javax.inject.Singleton;
@@ -35,4 +36,6 @@ public interface GlobalsComponent {
     Settings getRxSettings();
 
     boolean shouldAutoConnect();
+
+    PageManager<DataItem> newPageManager();
 }

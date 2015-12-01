@@ -16,13 +16,17 @@
  */
 package com.inqbarna.rxpagingsupport.sample;
 
+import android.os.Bundle;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.assertion.ViewAssertions;
 import android.support.test.rule.ActivityTestRule;
+import android.support.test.rule.DisableOnAndroidDebug;
 import android.support.test.runner.AndroidJUnit4;
+import android.support.v7.widget.RecyclerView;
 import android.util.Log;
 
 import com.inqbarna.rxpagingsupport.Page;
+import com.inqbarna.rxpagingsupport.PageManager;
 import com.inqbarna.rxpagingsupport.RxPagedAdapter;
 import com.inqbarna.rxpagingsupport.Settings;
 
@@ -31,10 +35,20 @@ import org.hamcrest.Matcher;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
+import org.junit.rules.TestRule;
+import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static android.support.test.espresso.Espresso.onView;
 import static android.support.test.espresso.contrib.RecyclerViewActions.scrollToPosition;
@@ -47,24 +61,79 @@ import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
+import static org.mockito.Matchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.when;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
  * @version 1.0 3/11/15
  */
 @RunWith(AndroidJUnit4.class)
-public class MainActivityTest {
+public class MainActivityTest implements DataModuleRule.DataModuleClient {
 
     //    @Rule
     //    public InjectedActivityTestRule<MainActivity> activityRule = new InjectedActivityTestRule<MainActivity>(MainActivity.class);
-    @Rule public ActivityTestRule<MainActivity> activityRule = new ActivityTestRule<MainActivity>(MainActivity.class, false, false);
+    public ActivityTestRule<MainActivity> activityRule = new ActivityTestRule<MainActivity>(MainActivity.class, false, false);
+
+    @Rule
+    public TestRule rule = RuleChain.outerRule(new DisableOnAndroidDebug(new Timeout(20, TimeUnit.SECONDS)))
+                                    .around(activityRule)
+                                    .around(new DataModuleRule(this));
 
     TestDataSource testDataSource;
 
-    @Before
-    public void doBefore() {
+    @Mock
+    PageManager<DataItem> pageManagerMock;
+
+    @Captor
+    ArgumentCaptor<RecyclerView.Adapter> adapterCaptor;
+
+    @Captor
+    ArgumentCaptor<Bundle> bundleCaptor;
+
+    private GlobalsComponent component;
+
+
+    @Override
+    public void mockSetup() {
+        MockitoAnnotations.initMocks(this);
         testDataSource = new TestDataSource();
-        App.get(InstrumentationRegistry.getTargetContext()).setDataModule(new TestDataModule(testDataSource.getNetSource(), testDataSource.getCacheManager()));
+        final TestDataModule dataModule = new TestDataModule(pageManagerMock, testDataSource.getNetSource(), testDataSource.getCacheManager());
+        final App app = App.get(InstrumentationRegistry.getTargetContext());
+        app.setDataModule(dataModule);
+
+        when(pageManagerMock.getTotalCount()).thenReturn(50);
+        when(pageManagerMock.isLastPageSeen()).thenReturn(true);
+        doAnswer(itemAnswer(dataModule.provideRxSettings(dataModule.provideRxPageLogger()))).when(pageManagerMock).getItem(anyInt());
+    }
+
+    private Answer itemAnswer(final Settings settings) {
+        return new Answer() {
+            @Override
+            public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
+                int itemIdx = (int)invocationOnMock.getArguments()[0];
+                return new DataItem(itemIdx % settings.getPageSize(), itemIdx);
+            }
+        };
+    }
+
+    @Override
+    public void regularSetup() {
+        testDataSource = new TestDataSource();
+        final TestDataModule dataModule = new TestDataModule(null, testDataSource.getNetSource(), testDataSource.getCacheManager());
+        App.get(InstrumentationRegistry.getTargetContext()).setDataModule(dataModule);
+    }
+
+    @Test
+    @DataModuleRule.DataModuleMode(useMock = true)
+    public void saveRestoreCalled() {
+        activityRule.launchActivity(null);
+
+        // screwed up...
+        final MainActivity activity = activityRule.getActivity();
+//        activity.per
     }
 
     @Test
@@ -122,7 +191,7 @@ public class MainActivityTest {
         countEnded = helper.awaitCountdown(4);
         assertThat(countEnded, is(true));
 
-//        InstrumentationRegistry.getInstrumentation().waitForIdle(new EmptyRunnable());
+        //        InstrumentationRegistry.getInstrumentation().waitForIdle(new EmptyRunnable());
 
         assertThat(dataConnection.getNetworkPages(), is(settings.getPageSpan() + decissionPageThreshold));
         assertThat(dataConnection.getDiskPages(), is(0));
@@ -132,6 +201,7 @@ public class MainActivityTest {
         assertThat(first.getOwnerPage(), not(0)); // ensure we have not moved forward
 
     }
+
 
     private void checkDataOnAdapter(Settings settings, RxPagedAdapter<DataItem, ?> adapter, int firstExpectedIdx) {
         // ensure adapter has settings pages * size items

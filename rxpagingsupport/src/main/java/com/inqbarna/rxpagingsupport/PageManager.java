@@ -19,6 +19,8 @@ package com.inqbarna.rxpagingsupport;
 import android.os.Bundle;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
 import android.util.SparseArray;
 
@@ -40,6 +42,7 @@ import rx.Scheduler;
 import rx.Subscription;
 import rx.android.schedulers.AndroidSchedulers;
 import rx.functions.Action0;
+import rx.subjects.BehaviorSubject;
 import rx.subjects.PublishSubject;
 
 /**
@@ -56,6 +59,32 @@ public class PageManager<T> {
 
     public interface PageLoadErrorListener {
         void onError(Throwable error);
+    }
+
+    public enum ManagerEventKind {
+        SavingState,
+        StateSaved,
+        RestoringState,
+        StateRestored,
+        LastPageReceived,
+        Recycle
+    }
+    public static class ManagerEvent {
+        public final Object arg;
+        public final ManagerEventKind kind;
+
+        private ManagerEvent(ManagerEventKind kind, Object arg) {
+            this.arg = arg;
+            this.kind = kind;
+        }
+
+        static ManagerEvent event(ManagerEventKind kind) {
+            return event(kind, null);
+        }
+
+        static ManagerEvent event(ManagerEventKind kind, Object arg) {
+            return new ManagerEvent(kind, arg);
+        }
     }
 
     private static class PageInfo<T> implements Parcelable {
@@ -146,41 +175,28 @@ public class PageManager<T> {
     }
 
     public void beginConnection(RxPageDispatcher<T> dispatcher) {
-        beginConnection(dispatcher, null);
-    }
-
-    public void beginConnection(RxPageDispatcher<T> dispatcher, Action0 onEndAction) {
         if (null != activeReceptionSubscription) {
             activeReceptionSubscription.unsubscribe();
         }
 
-        activeReceptionSubscription = bindToIncomes(requestsSubject.flatMap(dispatcher), onEndAction);
+        if (null == eventBehaviorSubject || eventBehaviorSubject.hasCompleted()) {
+            eventBehaviorSubject = BehaviorSubject.create();
+        }
+        dispatcher.setEvents(eventBehaviorSubject.asObservable());
+        activeReceptionSubscription = bindToIncomes(requestsSubject.flatMap(dispatcher));
         if (null != activeReceptionSubscription) {
             onBoundToIncomes();
         }
     }
 
 
-    private Subscription bindToIncomes(Observable<Page<T>> incomes, final Action0 onEndAction) {
+    private Subscription bindToIncomes(Observable<Page<T>> incomes) {
         if (!disposed) {
             final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
-                                                     .finallyDo(
-                                                             new Action0() {
-                                                                 @Override
-                                                                 public void call() {
-                                                                     if (null != onEndAction) {
-                                                                         onEndAction.call();
-                                                                     }
-                                                                 }
-                                                             }
-                                                     )
                                                      .subscribe(pageIncomeObserver);
 
             return subscription;
         } else {
-            if (null != onEndAction) {
-                onEndAction.call();
-            }
             return null;
         }
     }
@@ -291,7 +307,7 @@ public class PageManager<T> {
     private Observer<? super Page<T>> pageIncomeObserver = new Observer<Page<T>>() {
         @Override
         public void onCompleted() {
-            settings.getLogger().debug("Source completed, acknowledge last pate", null);
+            settings.getLogger().debug("Source completed, acknowledge last page", null);
             activeReceptionSubscription = null;
             clearPendingRequests();
             acknowledgeLastPage(false);
@@ -345,9 +361,10 @@ public class PageManager<T> {
     private       NavigableMap<IdxRange, PageInfo<T>> pageMap;
     private final SparseArray<PageRequest>            pendingRequests;
 
-    private final RecyclerView.Adapter        adapter;
-    private       PublishSubject<PageRequest> requestsSubject;
-    private       PageLoadErrorListener       errorListener;
+    @Nullable private RecyclerView.Adapter          adapter;
+    private           PublishSubject<PageRequest>   requestsSubject;
+    private           PageLoadErrorListener         errorListener;
+    public            BehaviorSubject<ManagerEvent> eventBehaviorSubject;
 
     private Subscription activeReceptionSubscription;
 
@@ -433,6 +450,10 @@ public class PageManager<T> {
         String Pages         = "pagemanager.pages";
     }
 
+    public PageManager(Settings settings) {
+        this(null, settings, null);
+    }
+
     public PageManager(RecyclerView.Adapter adapter, Settings settings, Bundle savedInstanceState) {
         this.adapter = adapter;
         this.settings = settings;
@@ -441,6 +462,7 @@ public class PageManager<T> {
         totalCount = 0;
         registeringMovement = false;
         requestsSubject = PublishSubject.create();
+        eventBehaviorSubject = BehaviorSubject.create();
         disposed = false;
         lastPageSeen = false;
         maxPageNumberSeen = -1;
@@ -449,17 +471,31 @@ public class PageManager<T> {
         pendingRequests = new SparseArray<>(5);
 
         if (null != savedInstanceState) {
-            lastPageSeen = savedInstanceState.getBoolean(State.LastSeen);
-            maxPageNumberSeen = savedInstanceState.getInt(State.MaxPageNumber);
-            final ArrayList<PageInfo<T>> pageInfoStore = savedInstanceState.getParcelableArrayList(State.Pages);
-            numPages = pageInfoStore.size();
-            for (int i = 0, pageInfoStoreSize = pageInfoStore.size(); i < pageInfoStoreSize; i++) {
-                PageInfo<T> pageInfo = pageInfoStore.get(i);
-                totalCount += pageInfo.getSize();
-                pageMap.put(pageInfo.adapterRange, pageInfo);
-                pages.add(pageInfo);
-            }
+            initStateFromBundle(savedInstanceState);
         }
+    }
+
+    void initStateFromBundle(@NonNull Bundle savedInstanceState) {
+        dispatchToEvents(ManagerEvent.event(ManagerEventKind.RestoringState));
+        lastPageSeen = savedInstanceState.getBoolean(State.LastSeen);
+        maxPageNumberSeen = savedInstanceState.getInt(State.MaxPageNumber);
+        final ArrayList<PageInfo<T>> pageInfoStore = savedInstanceState.getParcelableArrayList(State.Pages);
+        numPages = pageInfoStore.size();
+        for (int i = 0, pageInfoStoreSize = pageInfoStore.size(); i < pageInfoStoreSize; i++) {
+            PageInfo<T> pageInfo = pageInfoStore.get(i);
+            totalCount += pageInfo.getSize();
+            pageMap.put(pageInfo.adapterRange, pageInfo);
+            pages.add(pageInfo);
+        }
+        dispatchToEvents(ManagerEvent.event(ManagerEventKind.StateRestored, savedInstanceState));
+    }
+
+    public synchronized void setAdapter(RecyclerView.Adapter adapter) {
+        this.adapter = adapter;
+    }
+
+    private synchronized RecyclerView.Adapter getAdapter() {
+        return adapter;
     }
 
     public void addPage(Page<T> page) {
@@ -487,10 +523,13 @@ public class PageManager<T> {
             // TODO: 4/11/15 do something special here? or let the request next page return the empty page....
         }
 
+        final RecyclerView.Adapter targetAdapter = getAdapter();
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)
             insertPage(newPage, false);
-            adapter.notifyDataSetChanged();
+            if (null != targetAdapter) {
+                targetAdapter.notifyDataSetChanged();
+            }
         } else {
 
             //__, __, 2, 3, __, 5, 6, 7, __, __
@@ -517,14 +556,20 @@ public class PageManager<T> {
                     // we changed items... (else, we replaced a page)
                     if (offsetSize > 0) {
                         // we replaced pages, with bigger page...
-                        adapter.notifyItemRangeInserted(newPage.adapterRange.to - offsetSize, offsetSize);
-                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize() - offsetSize);
+                        if (null != targetAdapter) {
+                            targetAdapter.notifyItemRangeInserted(newPage.adapterRange.to - offsetSize, offsetSize);
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize() - offsetSize);
+                        }
                     } else if (offsetSize < 0) {
-                        adapter.notifyItemRangeRemoved(newPage.adapterRange.to, -offsetSize);
-                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                        if (null != targetAdapter) {
+                            targetAdapter.notifyItemRangeRemoved(newPage.adapterRange.to, -offsetSize);
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                        }
                     } else {
                         // we just replaced, with same size page...
-                        adapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                        if (null != targetAdapter) {
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                        }
                     }
                 } else {
                     // we're a page, in the middle of floor ... ceiling
@@ -568,7 +613,10 @@ public class PageManager<T> {
         pageMap.remove(toRemove.adapterRange);
         totalCount -= toRemove.getSize();
         numPages--;
-        adapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+        final RecyclerView.Adapter targetAdapter = getAdapter();
+        if (null != targetAdapter) {
+            targetAdapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+        }
     }
 
     private void applyOffsetToItemsFrom(PageInfo<T> floor, int offsetSize) {
@@ -595,7 +643,10 @@ public class PageManager<T> {
         pageMap.remove(toRemove.adapterRange);
         totalCount -= toRemove.getSize();
         numPages--;
-        adapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+        final RecyclerView.Adapter targetAdapter = getAdapter();
+        if (null != targetAdapter) {
+            targetAdapter.notifyItemRangeRemoved(toRemove.adapterRange.from, toRemove.getSize());
+        }
         applyOffsetToItemsFrom(toRemove, -toRemove.getSize());
     }
 
@@ -603,7 +654,11 @@ public class PageManager<T> {
         if (!lastPageSeen) {
             settings.getLogger().debug("Got last \"empty\" page", null);
             lastPageSeen = true;
-            adapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
+            final RecyclerView.Adapter targetAdapter = getAdapter();
+            if (null != targetAdapter) {
+                targetAdapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
+            }
+            dispatchToEvents(ManagerEvent.event(ManagerEventKind.LastPageReceived));
             if (fromEmptyPage) {
                 dispatchToSubject(
                         new Action0() {
@@ -660,7 +715,11 @@ public class PageManager<T> {
         totalCount += newPage.getSize();
         maxPageNumberSeen = Math.max(maxPageNumberSeen, newPage.pageNumber);
         numPages++;
-        adapter.notifyItemRangeInserted(newPage.adapterRange.from, newPage.getSize());
+
+        final RecyclerView.Adapter targetAdapter = getAdapter();
+        if (null != targetAdapter) {
+            targetAdapter.notifyItemRangeInserted(newPage.adapterRange.from, newPage.getSize());
+        }
     }
 
 
@@ -679,10 +738,12 @@ public class PageManager<T> {
     }
 
     public void onSaveInstanceState(Bundle outState) {
+        dispatchToEvents(ManagerEvent.event(ManagerEventKind.SavingState));
         outState.putBoolean(State.LastSeen, lastPageSeen);
         outState.putInt(State.MaxPageNumber, maxPageNumberSeen);
         ArrayList<PageInfo<T>> pageInfos = new ArrayList<>(pages);
         outState.putParcelableArrayList(State.Pages, pageInfos);
+        dispatchToEvents(ManagerEvent.event(ManagerEventKind.StateSaved, outState));
     }
 
     public void enableMovementDetection(RecyclerView view) {
@@ -717,12 +778,35 @@ public class PageManager<T> {
                             requestsSubject.onCompleted();
                         }
                     });
+
+            dispatchToEvents(ManagerEvent.event(ManagerEventKind.Recycle), true);
         }
     }
 
     private void dispatchToSubject(Action0 action) {
         if (null != activeReceptionSubscription) {
             deliverMessagesScheduler.createWorker().schedule(action);
+        }
+    }
+
+    private void dispatchToEvents(ManagerEvent event) {
+        dispatchToEvents(event, false);
+    }
+
+    private void dispatchToEvents(final ManagerEvent event, final boolean terminate) {
+        if (null != eventBehaviorSubject && !eventBehaviorSubject.hasCompleted()) {
+            deliverMessagesScheduler.createWorker().schedule(
+                    new Action0() {
+                        @Override
+                        public void call() {
+                            eventBehaviorSubject.onNext(event);
+                            if (terminate) {
+                                eventBehaviorSubject.onCompleted();
+                                eventBehaviorSubject = null;
+                            }
+                        }
+                    }
+            );
         }
     }
 

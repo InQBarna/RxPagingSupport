@@ -20,6 +20,7 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
+import com.inqbarna.rxpagingsupport.PageManager;
 import com.inqbarna.rxpagingsupport.RxStdDispatcher;
 import com.inqbarna.rxpagingsupport.RxPageDispatcher;
 import com.inqbarna.rxpagingsupport.RxPagedAdapter;
@@ -72,6 +73,11 @@ public class DataModule {
     @Singleton
     public RxStdDispatcher.RxPageCacheManager<DataItem> provideCacheManager() {
         return tds.getCacheManager();
+    }
+
+    @Provides
+    public PageManager<DataItem> providePageManager(Settings settings) {
+        return new PageManager<>(settings);
     }
 
     @Provides

@@ -17,10 +17,12 @@
 package com.inqbarna.rxpagingsupport.sample;
 
 import android.os.Bundle;
+import android.support.annotation.Nullable;
 import android.view.LayoutInflater;
 import android.view.ViewGroup;
 import android.widget.ProgressBar;
 
+import com.inqbarna.rxpagingsupport.PageManager;
 import com.inqbarna.rxpagingsupport.RxPagedAdapter;
 import com.inqbarna.rxpagingsupport.Settings;
 
@@ -29,6 +31,11 @@ import com.inqbarna.rxpagingsupport.Settings;
  * @version 1.0 3/11/15
  */
 public class TestAdapter extends RxPagedAdapter<DataItem, TestHolder>{
+
+    public TestAdapter(PageManager<DataItem> manager, Settings settings, @Nullable Bundle savedInstanceState) {
+        super(manager, settings, savedInstanceState);
+    }
+
     public TestAdapter(Settings settings, Bundle savedInstanceState) {
         super(settings, savedInstanceState);
     }

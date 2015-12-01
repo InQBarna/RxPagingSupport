@@ -39,6 +39,14 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
     private       PageManager<T> manager;
     private final Settings       settings;
 
+    public RxPagedAdapter(PageManager<T> manager, Settings settings, @Nullable Bundle savedInstanceState) {
+        this.settings = settings;
+        this.manager = manager;
+        this.manager.setAdapter(this);
+        this.manager.initStateFromBundle(savedInstanceState);
+        initState(savedInstanceState);
+    }
+
     public RxPagedAdapter(Settings settings, @Nullable Bundle savedInstanceState) {
         this.settings = settings;
         manager = new PageManager<>(this, settings, savedInstanceState);
@@ -91,6 +99,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         return View.NO_ID;
     }
 
+    public void setErrorListener(PageManager.PageLoadErrorListener listener) {
+        manager.setErrorListener(listener);
+    }
+
     private boolean isLastPosition(int position) {
         // this is true, when we should do special loading operation...
         return !manager.isLastPageSeen() && position == manager.getTotalCount();
@@ -112,10 +124,6 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
 //            settings.getLogger().error(builder.toString(), null);
 //        }
         return item;
-    }
-
-    public void beginConnection(RxPageDispatcher<T> dispatcher, Action0 onEndAction) {
-        manager.beginConnection(dispatcher, onEndAction);
     }
 
     public void beginConnection(RxPageDispatcher<T> dispatcher) {

@@ -75,6 +75,11 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
     }
 
     @Override
+    public void setEvents(Observable<PageManager.ManagerEvent> events) {
+        // default do nothing
+    }
+
+    @Override
     public final Observable<? extends Page<T>> call(PageRequest pageRequest) {
         final PageRequest.Type type = pageRequest.getType();
         switch (type) {

@@ -40,7 +40,7 @@ public class MainActivity extends BaseActivity {
         ButterKnife.bind(this);
 
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
-        adapter = new TestAdapter(getComponent().getRxSettings(), savedInstanceState);
+        adapter = new TestAdapter(getComponent().newPageManager(), getComponent().getRxSettings(), savedInstanceState);
         recyclerView.setAdapter(adapter);
         if (getComponent().shouldAutoConnect()) {
             beginBindingData();
@@ -48,6 +48,12 @@ public class MainActivity extends BaseActivity {
 
         recyclerView.addItemDecoration(adapter.newDebugDecoration(recyclerView));
 
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        adapter.onSaveInstanceState(outState);
     }
 
     @Override

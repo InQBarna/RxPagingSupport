@@ -24,4 +24,7 @@ import rx.functions.Func1;
  * @version 1.0 4/11/15
  */
 public interface RxPageDispatcher<T> extends Func1<PageRequest, Observable<? extends Page<T>>> {
+
+    void setEvents(Observable<PageManager.ManagerEvent> events);
+
 }
