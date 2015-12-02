@@ -42,6 +42,7 @@ import rx.Scheduler;
 import rx.Subscription;
 import rx.android.schedulers.AndroidSchedulers;
 import rx.functions.Action0;
+import rx.functions.Func1;
 import rx.subjects.BehaviorSubject;
 import rx.subjects.PublishSubject;
 
@@ -155,8 +156,7 @@ public class PageManager<T> {
             int tmpInt = in.readInt();
             pageSource = Source.values()[tmpInt];
             tmpInt = in.readInt();
-            pageItems = new ArrayList<>(tmpInt);
-            Collections.fill(pageItems, null);
+            pageItems = Collections.nCopies(tmpInt, null);
             globalStartIdx = in.readInt();
             globalEndIdx = in.readInt();
         }
@@ -182,8 +182,16 @@ public class PageManager<T> {
         if (null == eventBehaviorSubject || eventBehaviorSubject.hasCompleted()) {
             eventBehaviorSubject = BehaviorSubject.create();
         }
-        dispatcher.setEvents(eventBehaviorSubject.asObservable());
-        activeReceptionSubscription = bindToIncomes(requestsSubject.flatMap(dispatcher));
+        dispatcher.setEvents(eventBehaviorSubject.serialize());
+        activeReceptionSubscription = bindToIncomes(
+                requestsSubject.serialize().map(dispatcher).flatMap(
+                        new Func1<Observable<? extends Page<T>>, Observable<? extends Page<T>>>() {
+                            @Override
+                            public Observable<? extends Page<T>> call(Observable<? extends Page<T>> observable) {
+                                return observable.subscribeOn(deliverMessagesScheduler);
+                            }
+                        }
+                ));
         if (null != activeReceptionSubscription) {
             onBoundToIncomes();
         }
@@ -191,7 +199,7 @@ public class PageManager<T> {
 
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
-        if (!disposed) {
+        if (!isDisposed()) {
             final Subscription subscription = incomes.observeOn(AndroidSchedulers.mainThread())
                                                      .subscribe(pageIncomeObserver);
 
@@ -202,15 +210,16 @@ public class PageManager<T> {
     }
 
     private void onBoundToIncomes() {
-        AndroidSchedulers.mainThread().createWorker()
-                         .schedule(
-                                 new Action0() {
-                                     @Override
-                                     public void call() {
-                                         sendInitialRequests();
-                                     }
-                                 }, 300, TimeUnit.MILLISECONDS
-                         );
+//        AndroidSchedulers.mainThread().createWorker()
+//                         .schedule(
+//                                 new Action0() {
+//                                     @Override
+//                                     public void call() {
+//                                         sendInitialRequests();
+//                                     }
+//                                 }, 300, TimeUnit.MILLISECONDS
+//                         );
+        sendInitialRequests();
     }
 
     private void sendInitialRequests() {
@@ -325,10 +334,16 @@ public class PageManager<T> {
         @Override
         public void onNext(Page<T> tPage) {
             removePendigRequest(tPage.getPage());
-            addPage(tPage);
+            if (!isDisposed()) {
+                addPage(tPage);
+            }
             tPage.recycle(); // after added, release any resource...
         }
     };
+
+    private synchronized boolean isDisposed() {
+        return disposed;
+    }
 
     private void clearPendingRequests() {
         synchronized (pendingRequests) {
@@ -743,7 +758,12 @@ public class PageManager<T> {
         outState.putInt(State.MaxPageNumber, maxPageNumberSeen);
         ArrayList<PageInfo<T>> pageInfos = new ArrayList<>(pages);
         outState.putParcelableArrayList(State.Pages, pageInfos);
-        dispatchToEvents(ManagerEvent.event(ManagerEventKind.StateSaved, outState));
+        List<Page<T>> pagesSaved = new ArrayList<>(pageInfos.size());
+        for (int i = 0, sz = pageInfos.size(); i < sz; i++) {
+            final PageInfo<T> info = pageInfos.get(i);
+            pagesSaved.add(new Page<>(info.pageNumber, info.globalStartIdx, info.pageSource, info.pageItems));
+        }
+        dispatchToEvents(ManagerEvent.event(ManagerEventKind.StateSaved, pagesSaved));
     }
 
     public void enableMovementDetection(RecyclerView view) {
@@ -765,7 +785,7 @@ public class PageManager<T> {
         }
     }
 
-    public void recycle() {
+    public synchronized void recycle() {
         if (!disposed) {
             disposed = true;
             scrollListener.resetState();
@@ -784,9 +804,7 @@ public class PageManager<T> {
     }
 
     private void dispatchToSubject(Action0 action) {
-        if (null != activeReceptionSubscription) {
-            deliverMessagesScheduler.createWorker().schedule(action);
-        }
+        action.call();
     }
 
     private void dispatchToEvents(ManagerEvent event) {
@@ -795,18 +813,11 @@ public class PageManager<T> {
 
     private void dispatchToEvents(final ManagerEvent event, final boolean terminate) {
         if (null != eventBehaviorSubject && !eventBehaviorSubject.hasCompleted()) {
-            deliverMessagesScheduler.createWorker().schedule(
-                    new Action0() {
-                        @Override
-                        public void call() {
-                            eventBehaviorSubject.onNext(event);
-                            if (terminate) {
-                                eventBehaviorSubject.onCompleted();
-                                eventBehaviorSubject = null;
-                            }
-                        }
-                    }
-            );
+            eventBehaviorSubject.onNext(event);
+            if (terminate) {
+                eventBehaviorSubject.onCompleted();
+                eventBehaviorSubject = null;
+            }
         }
     }
 

@@ -433,7 +433,6 @@ public class ManagerTest {
         final TestDispatcher dispatcher = new TestDispatcher(settings, netSrc, null);
         manager.beginConnection(dispatcher);
         manager.recycle();
-        verify(netSrc, never()).processRequest(anyTargetPage());
         final List<PageManager.ManagerEvent> events = dispatcher.getTestObserver().getOnNextEvents();
         assertThat(events, hasItem(event(PageManager.ManagerEventKind.Recycle)));
     }
