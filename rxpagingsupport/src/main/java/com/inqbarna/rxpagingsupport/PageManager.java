@@ -23,6 +23,7 @@ import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v7.widget.RecyclerView;
 import android.util.SparseArray;
+import android.view.View;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,7 +35,6 @@ import java.util.NavigableSet;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
 import rx.Observer;
@@ -611,6 +611,11 @@ public class PageManager<T> {
         if (notifyLastPageAfter) {
             acknowledgeLastPage(true);
         }
+
+        if (null != expectedMove) {
+            expectedMove.run();
+            expectedMove = null;
+        }
     }
 
     private void addNewPageAfter(PageInfo<T> newPage, PageInfo<T> floor) {
@@ -869,6 +874,8 @@ public class PageManager<T> {
         return pageMap.get(containingPageRange).pageSource;
     }
 
+    private Runnable expectedMove = null;
+
     private class ManagerScrollListener extends RecyclerView.OnScrollListener {
         final int WAIT          = 0;
         final int GET_DIRECTION = 1;
@@ -903,13 +910,20 @@ public class PageManager<T> {
                     if (myState != WAIT) {
                         myState = WAIT;
                         if (absDisplacement > 0) {
-                            onMovingDown(recyclerView);
+                            int height = onMovingDown(recyclerView);
+                            if (height > 0) {
+                                expectedMove = expectedDown(recyclerView, height);
+                            }
                         } else if (absDisplacement < 0) {
-                            onMovingUp(recyclerView);
+                            int height = onMovingUp(recyclerView);
+                            if (height > 0) {
+                                expectedMove = expectedDown(recyclerView, -height);
+                            }
                         }
                     }
                     break;
                 case RecyclerView.SCROLL_STATE_DRAGGING:
+                    expectedMove = null;
                     if (myState == WAIT && null != activeReceptionSubscription) {
                         absDisplacement = 0;
                         myState = GET_DIRECTION;
@@ -917,6 +931,15 @@ public class PageManager<T> {
                 default:
                     // no-op
             }
+        }
+
+        private Runnable expectedDown(final RecyclerView recyclerView, final int dy) {
+            return new Runnable() {
+                @Override
+                public void run() {
+                    recyclerView.smoothScrollBy(0, dy);
+                }
+            };
         }
 
         @Override
@@ -927,16 +950,17 @@ public class PageManager<T> {
             }
         }
 
-        private void onMovingUp(RecyclerView recyclerView) {
+        private int onMovingUp(RecyclerView recyclerView) {
             final int nChilds = recyclerView.getChildCount();
             if (nChilds == 0) {
-                return; // should never happen indeed (we can scroll because there are elements!)
+                return -1; // should never happen indeed (we can scroll because there are elements!)
             }
 
             final int hidenItemCount = getTotalCount() - nChilds;
 
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
-            final int firstChildPos = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(0));
+            final View firstChild = recyclerView.getChildAt(0);
+            final int firstChildPos = recyclerView.getChildAdapterPosition(firstChild);
             final int numSidePages = (settings.getPageSpan() - 1) / 2;
             final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(firstChildPos)); // this gives which page first child lives within
             // NOTE: floorKey must not be null, otherwise we're doing something very bad....
@@ -953,13 +977,18 @@ public class PageManager<T> {
                     toRenew--;
                 }
             }
+            return firstChild.getHeight();
         }
 
-        private void onMovingDown(RecyclerView recyclerView) {
+        private int onMovingDown(RecyclerView recyclerView) {
             final int nChilds = recyclerView.getChildCount();
+            if (nChilds == 0) {
+                return -1; // should never happen indeed (we can scroll because there are elements!)
+            }
             final int hidenItemCount = getTotalCount() - nChilds;
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
-            final int lastChild = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(nChilds - 1));
+            final View lastChildView = recyclerView.getChildAt(nChilds - 1);
+            final int lastChild = recyclerView.getChildAdapterPosition(lastChildView);
             final int numSidePages = (settings.getPageSpan() - 1) / 2;
             final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(lastChild));
             // NOTE: floorKey must not be null, otherwise we're doing something very bad....
@@ -978,6 +1007,7 @@ public class PageManager<T> {
                     toRenew--;
                 }
             }
+            return lastChildView.getHeight();
         }
     }
 }
