@@ -231,8 +231,17 @@ public class PageManager<T> {
         } else {
             // Ok, we must be recovering state... request exactly same pages, from Cache.... (current pages are just placeholders)
             settings.getLogger().info("Loading pages from saved state, get contents from disk cache", null);
+            int shouldRequest = settings.getPageSpan();
+            int lastRequested = 0;
             for (PageInfo<T> pageInfo : pages) {
-                requestPage(pageInfo.pageNumber, false);
+                lastRequested = pageInfo.pageNumber;
+                requestPage(lastRequested, false);
+                shouldRequest--;
+            }
+
+            while (shouldRequest > 0) {
+                requestPage(++lastRequested, false);
+                shouldRequest--;
             }
         }
     }
@@ -241,11 +250,16 @@ public class PageManager<T> {
     private ManagerScrollListener scrollListener = new ManagerScrollListener();
 
     private void requestPage(int pageNo, boolean checkNotInPages) {
+        if (pageNo < 0 || (lastPageSeen && pageNo > maxPageNumberSeen)) {
+            // do not request, avoid work load
+            return;
+        }
         PageRequest pageRequest = null;
         synchronized (pendingRequests) {
             boolean requestPending = pendingRequests.indexOfKey(pageNo) >= 0;
             if (!requestPending) {
-                pageNo = Math.max(0, lastPageSeen ? Math.min(pageNo, maxPageNumberSeen) : pageNo); // safety clipping
+
+
                 PageRequest.Type type;
                 if (pageNo <= maxPageNumberSeen) {
                     type = PageRequest.Type.Disk;
@@ -531,11 +545,12 @@ public class PageManager<T> {
             return;
         }
 
+        boolean notifyLastPageAfter = false;
         if (newPage.getSize() != settings.getPageSize()) {
-            settings.getLogger().info(
+            settings.getLogger().debug(
                     "Probably we got last page, because it's smaller than requested page size..." + newPage.getSize() + " < " + settings.getPageSize() + " pageNo = "
                             + newPage.pageNumber, null);
-            // TODO: 4/11/15 do something special here? or let the request next page return the empty page....
+            notifyLastPageAfter = true;
         }
 
         final RecyclerView.Adapter targetAdapter = getAdapter();
@@ -591,6 +606,10 @@ public class PageManager<T> {
                     addNewPageAfter(newPage, floor);
                 }
             }
+        }
+
+        if (notifyLastPageAfter) {
+            acknowledgeLastPage(true);
         }
     }
 
@@ -667,23 +686,23 @@ public class PageManager<T> {
 
     private void acknowledgeLastPage(boolean fromEmptyPage) {
         if (!lastPageSeen) {
-            settings.getLogger().debug("Got last \"empty\" page", null);
+            settings.getLogger().debug("Acknowledged LAST page seen", null);
             lastPageSeen = true;
             final RecyclerView.Adapter targetAdapter = getAdapter();
             if (null != targetAdapter) {
                 targetAdapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
             }
             dispatchToEvents(ManagerEvent.event(ManagerEventKind.LastPageReceived));
-            if (fromEmptyPage) {
-                dispatchToSubject(
-                        new Action0() {
-                            @Override
-                            public void call() {
-                                requestsSubject.onCompleted();
-                            }
-                        }
-                );
-            }
+//            if (fromEmptyPage) {
+//                dispatchToSubject(
+//                        new Action0() {
+//                            @Override
+//                            public void call() {
+//                                requestsSubject.onCompleted();
+//                            }
+//                        }
+//                );
+//            }
         }
     }
 
