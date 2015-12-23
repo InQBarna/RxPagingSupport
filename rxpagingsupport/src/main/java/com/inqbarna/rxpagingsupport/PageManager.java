@@ -35,6 +35,7 @@ import java.util.NavigableSet;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
 import rx.Observer;
@@ -332,6 +333,11 @@ public class PageManager<T> {
         public void onCompleted() {
             settings.getLogger().debug("Source completed, acknowledge last page", null);
             activeReceptionSubscription = null;
+            if (null != doOnComplete) {
+                final Scheduler.Worker worker = deliverMessagesScheduler.createWorker();
+                worker.schedule(doOnComplete);
+                doOnComplete = null;
+            }
             clearPendingRequests();
             acknowledgeLastPage(false);
         }
@@ -396,6 +402,7 @@ public class PageManager<T> {
     public            BehaviorSubject<ManagerEvent> eventBehaviorSubject;
 
     private Subscription activeReceptionSubscription;
+    private Action0 doOnComplete = null;
 
     private static class IdxRange implements Comparable<IdxRange> {
         private int from;
@@ -698,16 +705,16 @@ public class PageManager<T> {
                 targetAdapter.notifyItemRemoved(totalCount); // ok, last page... because it's empty...
             }
             dispatchToEvents(ManagerEvent.event(ManagerEventKind.LastPageReceived));
-//            if (fromEmptyPage) {
-//                dispatchToSubject(
-//                        new Action0() {
-//                            @Override
-//                            public void call() {
-//                                requestsSubject.onCompleted();
-//                            }
-//                        }
-//                );
-//            }
+            //            if (fromEmptyPage) {
+            //                dispatchToSubject(
+            //                        new Action0() {
+            //                            @Override
+            //                            public void call() {
+            //                                requestsSubject.onCompleted();
+            //                            }
+            //                        }
+            //                );
+            //            }
         }
     }
 
@@ -823,7 +830,12 @@ public class PageManager<T> {
                         }
                     });
 
-            dispatchToEvents(ManagerEvent.event(ManagerEventKind.Recycle), true);
+            doOnComplete = new Action0() {
+                @Override
+                public void call() {
+                    dispatchToEvents(ManagerEvent.event(ManagerEventKind.Recycle), true);
+                }
+            };
         }
     }
 

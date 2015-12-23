@@ -137,7 +137,7 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
         final Func1<Throwable, Observable<? extends Page<T>>> func1 = new Func1<Throwable, Observable<? extends Page<T>>>() {
             @Override
             public Observable<? extends Page<T>> call(Throwable throwable) {
-                settings.getLogger().info("Failed request on network " + pageRequest + ", doing fallback to disk cache", null);
+                settings.getLogger().info("Failed request on network " + pageRequest + ", doing fallback to disk cache", throwable);
                 return processDiskRequest(pageRequest, false);
             }
         };
