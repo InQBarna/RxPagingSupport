@@ -35,7 +35,6 @@ import java.util.NavigableSet;
 import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
 import rx.Observer;
@@ -59,6 +58,13 @@ public class PageManager<T> {
         }
     };
 
+    private static final Func1<Object, Boolean> NO_FILTER = new Func1<Object, Boolean>() {
+        @Override
+        public Boolean call(Object o) {
+            return true;
+        }
+    };
+
     public interface PageLoadErrorListener {
         void onError(Throwable error);
     }
@@ -71,8 +77,9 @@ public class PageManager<T> {
         LastPageReceived,
         Recycle
     }
+
     public static class ManagerEvent {
-        public final Object arg;
+        public final Object           arg;
         public final ManagerEventKind kind;
 
         private ManagerEvent(ManagerEventKind kind, Object arg) {
@@ -91,11 +98,11 @@ public class PageManager<T> {
 
     private static class PageInfo<T> implements Parcelable {
         IdxRange adapterRange;
-        int     pageNumber;
-        Source  pageSource;
-        List<T> pageItems;
-        int     globalStartIdx;
-        int     globalEndIdx;
+        int      pageNumber;
+        Source   pageSource;
+        List<T>  pageItems;
+        int      globalStartIdx;
+        int      globalEndIdx;
 
         private PageInfo() {
         }
@@ -104,22 +111,29 @@ public class PageManager<T> {
             return pageItems.get(absoluteIdx - adapterRange.from);
         }
 
-        void setItems(Collection<? extends T> items, int sourceOffset) {
-            pageItems = new ArrayList<>(items);
+        void setItems(Collection<? extends T> items, int sourceOffset, Func1<Object, Boolean> filterFunc) {
+            int inputSize = items.size();
+            pageItems = new ArrayList<>(inputSize);
             globalStartIdx = sourceOffset;
-            globalEndIdx = sourceOffset + items.size() - 1;
+            globalEndIdx = sourceOffset + inputSize - 1;
+            for (T item : items) {
+                if (filterFunc.call(item)) {
+                    pageItems.add(item);
+                }
+            }
+            adapterRange = new IdxRange(0, pageItems.size() - 1);
         }
 
         int getSize() {
             return null == pageItems ? 0 : pageItems.size();
         }
 
-        static <T> PageInfo<T> fromPage(Page<T> page) throws Throwable {
+        static <T> PageInfo<T> fromPage(Page<T> page, Func1<Object, Boolean> filterFunc) throws Throwable {
             PageInfo<T> info = new PageInfo<>();
             info.pageNumber = page.getPage();
             info.pageSource = page.getSource();
-            info.setItems(page.getItems(), page.getOffset());
-            info.adapterRange = new IdxRange(0, page.getSize() - 1);
+            info.setItems(page.getItems(), page.getOffset(), filterFunc);
+
             return info;
         }
 
@@ -198,6 +212,13 @@ public class PageManager<T> {
         }
     }
 
+    public void setFilterFunc(Func1<T, Boolean> filterFunc) {
+        if (filterFunc == null) {
+            this.filterFunc = NO_FILTER;
+        } else {
+            this.filterFunc = (Func1<Object, Boolean>) filterFunc;
+        }
+    }
 
     private Subscription bindToIncomes(Observable<Page<T>> incomes) {
         if (!isDisposed()) {
@@ -381,6 +402,12 @@ public class PageManager<T> {
         }
     }
 
+    private boolean hasPendingRequests() {
+        synchronized (pendingRequests) {
+            return pendingRequests.size() != 0;
+        }
+    }
+
     private final Settings settings;
 
     private int maxPageNumberSeen = -1;
@@ -389,6 +416,9 @@ public class PageManager<T> {
     private int     totalCount;
     private boolean registeringMovement;
     private boolean disposed;
+    private int     numSpanItems;
+
+    private Func1<Object, Boolean> filterFunc = NO_FILTER;
 
     private Scheduler deliverMessagesScheduler;
 
@@ -497,6 +527,7 @@ public class PageManager<T> {
         numPages = 0;
         totalCount = 0;
         registeringMovement = false;
+        numSpanItems = settings.getPageSpan() * settings.getPageSize();
         requestsSubject = PublishSubject.create();
         eventBehaviorSubject = BehaviorSubject.create();
         disposed = false;
@@ -537,25 +568,30 @@ public class PageManager<T> {
     public void addPage(Page<T> page) {
 
         PageInfo<T> newPage;
+        int pageSizeReceived;
         try {
+            pageSizeReceived = page.getSize();
             if (page.isEmpty()) {
                 settings.getLogger().debug("empty page " + page + ", acknowledge last page", null);
                 acknowledgeLastPage(true);
                 return;
             }
 
-            settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + page.getSize(), null);
-            newPage = PageInfo.fromPage(page);
+            settings.getLogger().debug("Got next page: " + page.getPage() + ", size: " + pageSizeReceived, null);
+            newPage = PageInfo.fromPage(page, filterFunc);
         } catch (Throwable throwable) {
             settings.getLogger().error("Error on incoming page: " + page.getPage(), throwable);
             forwardError(throwable);
             return;
         }
 
+        final int initialCount = totalCount;
+
         boolean notifyLastPageAfter = false;
-        if (newPage.getSize() != settings.getPageSize()) {
+        int newPageSize = newPage.getSize();
+        if (pageSizeReceived != settings.getPageSize()) {
             settings.getLogger().debug(
-                    "Probably we got last page, because it's smaller than requested page size..." + newPage.getSize() + " < " + settings.getPageSize() + " pageNo = "
+                    "Probably we got last page, because it's smaller than requested page size..." + newPageSize + " < " + settings.getPageSize() + " pageNo = "
                             + newPage.pageNumber, null);
             notifyLastPageAfter = true;
         }
@@ -564,9 +600,6 @@ public class PageManager<T> {
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)
             insertPage(newPage, false);
-            if (null != targetAdapter) {
-                targetAdapter.notifyDataSetChanged();
-            }
         } else {
 
             //__, __, 2, 3, __, 5, 6, 7, __, __
@@ -595,17 +628,17 @@ public class PageManager<T> {
                         // we replaced pages, with bigger page...
                         if (null != targetAdapter) {
                             targetAdapter.notifyItemRangeInserted(newPage.adapterRange.to - offsetSize, offsetSize);
-                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize() - offsetSize);
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPageSize - offsetSize);
                         }
                     } else if (offsetSize < 0) {
                         if (null != targetAdapter) {
                             targetAdapter.notifyItemRangeRemoved(newPage.adapterRange.to, -offsetSize);
-                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPageSize);
                         }
                     } else {
                         // we just replaced, with same size page...
-                        if (null != targetAdapter) {
-                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPage.getSize());
+                        if (null != targetAdapter && newPageSize != 0) {
+                            targetAdapter.notifyItemRangeChanged(newPage.adapterRange.from, newPageSize);
                         }
                     }
                 } else {
@@ -619,14 +652,19 @@ public class PageManager<T> {
             acknowledgeLastPage(true);
         }
 
-        if (null != expectedMove) {
-            expectedMove.run();
-            expectedMove = null;
+        if (!hasPendingRequests()) {
+
+            if (totalCount < numSpanItems && !lastPageSeen) {
+                requestPage(maxPageNumberSeen + 1, false);
+            } else if (null != expectedMove) {
+                expectedMove.run();
+                expectedMove = null;
+            }
         }
     }
 
     private void addNewPageAfter(PageInfo<T> newPage, PageInfo<T> floor) {
-        if (numPages == settings.getPageSpan()) {
+        if (getEstimatedNumPages() == settings.getPageSpan()) {
             // which side to remove, left or right?
             final int itemsLeft = pages.headSet(newPage, false).size();
             final int itemsRight = pages.tailSet(newPage, false).size();
@@ -646,7 +684,7 @@ public class PageManager<T> {
     }
 
     private void addNewPageAtBegining(PageInfo<T> newPage) {
-        if (numPages == settings.getPageSpan()) {
+        if (getEstimatedNumPages() == settings.getPageSpan()) {
             removeLastPage();
         }
 
@@ -675,8 +713,12 @@ public class PageManager<T> {
         }
     }
 
+    private int getEstimatedNumPages() {
+        return (int)(((double)totalCount / settings.getPageSize()) + 0.5);
+    }
+
     private void addNewPageAtEnd(PageInfo<T> newPage) {
-        if (numPages == settings.getPageSpan()) {
+        if (getEstimatedNumPages() == settings.getPageSpan()) {
             removeFirstPage();
         }
 
@@ -732,12 +774,15 @@ public class PageManager<T> {
     private int replacePages(PageInfo<T> newPage, PageInfo<T> oldPage) {
         int offsetSize;
         newPage.adapterRange = newPage.adapterRange.offset(oldPage.adapterRange.from);
-        offsetSize = newPage.getSize() - oldPage.getSize();
+        int newPageSize = newPage.getSize();
+        offsetSize = newPageSize - oldPage.getSize();
         pageMap.remove(oldPage.adapterRange); // remove it because we're replacing the page
-        pageMap.put(newPage.adapterRange, newPage);
-        totalCount += offsetSize;
         pages.remove(oldPage);
-        pages.add(newPage);
+        if (newPageSize > 0) {
+            pageMap.put(newPage.adapterRange, newPage);
+            pages.add(newPage);
+        }
+        totalCount += offsetSize;
         return offsetSize;
     }
 
@@ -753,6 +798,13 @@ public class PageManager<T> {
     }
 
     private void insertPage(PageInfo<T> newPage, boolean withOffsets) {
+
+        // special case, all items where filtered... account page seen, but do not add it...
+        if (newPage.getSize() == 0) {
+            maxPageNumberSeen = Math.max(maxPageNumberSeen, newPage.pageNumber);
+            return;
+        }
+
         if (withOffsets) {
             applyOffsetToItemsFrom(newPage, newPage.getSize());
         }
@@ -771,6 +823,10 @@ public class PageManager<T> {
 
     public int getTotalCount() {
         return totalCount;
+    }
+
+    private int getExpectedTotalItems() {
+        return numPages * settings.getPageSize();
     }
 
     public boolean isLastPageSeen() {
@@ -968,7 +1024,7 @@ public class PageManager<T> {
                 return -1; // should never happen indeed (we can scroll because there are elements!)
             }
 
-            final int hidenItemCount = getTotalCount() - nChilds;
+            final int hidenItemCount = getExpectedTotalItems() - nChilds;
 
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final View firstChild = recyclerView.getChildAt(0);
@@ -997,7 +1053,7 @@ public class PageManager<T> {
             if (nChilds == 0) {
                 return -1; // should never happen indeed (we can scroll because there are elements!)
             }
-            final int hidenItemCount = getTotalCount() - nChilds;
+            final int hidenItemCount = getExpectedTotalItems() - nChilds;
             final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final View lastChildView = recyclerView.getChildAt(nChilds - 1);
             final int lastChild = recyclerView.getChildAdapterPosition(lastChildView);

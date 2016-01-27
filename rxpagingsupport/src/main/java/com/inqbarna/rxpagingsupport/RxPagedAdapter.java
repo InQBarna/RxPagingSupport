@@ -24,6 +24,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import rx.functions.Action0;
+import rx.functions.Func1;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
@@ -145,6 +146,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
 
     public void onSaveInstanceState(Bundle outState) {
         manager.onSaveInstanceState(outState);
+    }
+
+    public void setFilterFunc(Func1<T, Boolean> filterFunc) {
+        manager.setFilterFunc(filterFunc);
     }
 
     public RecyclerView.ItemDecoration newDebugDecoration(RecyclerView recyclerView) {
