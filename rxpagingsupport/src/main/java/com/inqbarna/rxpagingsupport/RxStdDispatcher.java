@@ -126,7 +126,7 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
                 );
             }
 
-            if (diskFallback) {
+            if (diskFallback && null != diskSource) {
                 observable = prepareDiskFallback((Observable<Page<T>>) observable, pageRequest);
             }
             return observable;

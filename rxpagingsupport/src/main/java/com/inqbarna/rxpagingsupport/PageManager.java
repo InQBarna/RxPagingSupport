@@ -121,7 +121,12 @@ public class PageManager<T> {
                     pageItems.add(item);
                 }
             }
-            adapterRange = new IdxRange(0, pageItems.size() - 1);
+
+            if (pageItems.size() > 0) {
+                adapterRange = new IdxRange(0, pageItems.size() - 1);
+            } else {
+                adapterRange = new IdxRange(0, 0);
+            }
         }
 
         int getSize() {
@@ -589,7 +594,7 @@ public class PageManager<T> {
 
         boolean notifyLastPageAfter = false;
         int newPageSize = newPage.getSize();
-        if (pageSizeReceived != settings.getPageSize()) {
+        if (pageSizeReceived < settings.getPageSize()) {
             settings.getLogger().debug(
                     "Probably we got last page, because it's smaller than requested page size..." + newPageSize + " < " + settings.getPageSize() + " pageNo = "
                             + newPage.pageNumber, null);
@@ -670,12 +675,20 @@ public class PageManager<T> {
             final int itemsRight = pages.tailSet(newPage, false).size();
             if (itemsLeft >= itemsRight) {
                 removeFirstPage();
+                if (itemsLeft == 1) {
+                    floor = null;
+                }
             } else {
                 removeLastPage();
+                if (itemsRight == 1) {
+                    floor = null;
+                }
             }
         }
 
-        newPage.adapterRange = newPage.adapterRange.offset(floor.adapterRange.to + 1);
+        if (null != floor) {
+            newPage.adapterRange = newPage.adapterRange.offset(floor.adapterRange.to + 1);
+        }
         insertPage(newPage, true);
     }
 
