@@ -34,6 +34,8 @@ public class Settings {
 
     private int       pageSpan;
     private int       pageSize;
+    private int       prefetchPages;
+    private int       prefetchDistance;
     private boolean   fallbackToCacheAfterNetworkFail;
     private Scheduler deliveryScheduler;
     private Logger    logger;
@@ -50,12 +52,20 @@ public class Settings {
         return pageSpan;
     }
 
+    public int getPagesToPrefetch() {
+        return prefetchPages;
+    }
+
     public Scheduler getDeliveryScheduler() {
         return deliveryScheduler;
     }
 
     public int getPageSize() {
         return pageSize;
+    }
+
+    public int getPrefetchDistance() {
+        return prefetchDistance;
     }
 
     public boolean hasCacheFallbackEnabled() {
@@ -69,7 +79,9 @@ public class Settings {
     private Settings() {
         pageSpan = DEFAULT_PAGE_SPAN;
         pageSize = DEFAULT_PAGE_SIZE;
+        prefetchPages = -1;
         fallbackToCacheAfterNetworkFail = true;
+        prefetchDistance = -1;
     }
 
 
@@ -79,6 +91,7 @@ public class Settings {
 
     public static class Builder {
         private Settings settings;
+
         private Builder(Settings settings) {
             this.settings = settings;
         }
@@ -98,9 +111,19 @@ public class Settings {
             return this;
         }
 
+        public Builder prefetchPages(int pagesToPrefetch) {
+            settings.prefetchPages = pagesToPrefetch;
+            return this;
+        }
+
         /** Set the scheduler page request will be done on. Default: Schedulers.io() */
         public Builder setDeliveryScheduler(Scheduler scheduler) {
             settings.deliveryScheduler = scheduler;
+            return this;
+        }
+
+        public Builder prefetchDistance(int numItems) {
+            settings.prefetchDistance = numItems;
             return this;
         }
 
@@ -118,6 +141,14 @@ public class Settings {
     private void initializeEmpty() {
         if (null == deliveryScheduler) {
             deliveryScheduler = Schedulers.io();
+        }
+
+        if (-1 == prefetchPages) {
+            prefetchPages = pageSpan;
+        }
+
+        if (-1 == prefetchDistance) {
+            prefetchDistance = (int)((double) pageSize * 0.2 + 0.5);
         }
 
         if (null == logger) {

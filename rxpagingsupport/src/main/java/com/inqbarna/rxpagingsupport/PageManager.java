@@ -32,7 +32,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
-import java.util.SortedMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 
@@ -251,7 +250,7 @@ public class PageManager<T> {
 
     private void sendInitialRequests() {
         if (pages.isEmpty()) {
-            int numPagesReq = settings.getPageSpan();
+            int numPagesReq = settings.getPagesToPrefetch();
             for (int i = 0; i < numPagesReq; i++) {
                 requestPage(i, true);
             }
@@ -421,7 +420,7 @@ public class PageManager<T> {
     private int     totalCount;
     private boolean registeringMovement;
     private boolean disposed;
-    private int     numSpanItems;
+    private int     minAmountItemsLoaded;
 
     private Func1<Object, Boolean> filterFunc = NO_FILTER;
 
@@ -532,7 +531,7 @@ public class PageManager<T> {
         numPages = 0;
         totalCount = 0;
         registeringMovement = false;
-        numSpanItems = settings.getPageSpan() * settings.getPageSize();
+        minAmountItemsLoaded = settings.getPagesToPrefetch() * settings.getPageSize();
         requestsSubject = PublishSubject.create();
         eventBehaviorSubject = BehaviorSubject.create();
         disposed = false;
@@ -590,8 +589,6 @@ public class PageManager<T> {
             return;
         }
 
-        final int initialCount = totalCount;
-
         boolean notifyLastPageAfter = false;
         int newPageSize = newPage.getSize();
         if (pageSizeReceived < settings.getPageSize()) {
@@ -604,7 +601,7 @@ public class PageManager<T> {
         final RecyclerView.Adapter targetAdapter = getAdapter();
         if (numPages == 0) {
             // ok, just add the first page... nothing special to do.... (but initialize counters)
-            insertPage(newPage, false);
+            insertPage(newPage, false, true);
         } else {
 
             //__, __, 2, 3, __, 5, 6, 7, __, __
@@ -658,8 +655,7 @@ public class PageManager<T> {
         }
 
         if (!hasPendingRequests()) {
-
-            if (totalCount < numSpanItems && !lastPageSeen) {
+            if (totalCount < minAmountItemsLoaded && !lastPageSeen) {
                 requestPage(maxPageNumberSeen + 1, false);
             } else if (null != expectedMove) {
                 expectedMove.run();
@@ -811,6 +807,10 @@ public class PageManager<T> {
     }
 
     private void insertPage(PageInfo<T> newPage, boolean withOffsets) {
+        insertPage(newPage, withOffsets, false);
+    }
+
+    private void insertPage(PageInfo<T> newPage, boolean withOffsets, boolean notifyFullUpdate) {
 
         // special case, all items where filtered... account page seen, but do not add it...
         if (newPage.getSize() == 0) {
@@ -829,7 +829,11 @@ public class PageManager<T> {
 
         final RecyclerView.Adapter targetAdapter = getAdapter();
         if (null != targetAdapter) {
-            targetAdapter.notifyItemRangeInserted(newPage.adapterRange.from, newPage.getSize());
+            if (notifyFullUpdate) {
+                targetAdapter.notifyDataSetChanged();
+            } else {
+                targetAdapter.notifyItemRangeInserted(newPage.adapterRange.from, newPage.getSize());
+            }
         }
     }
 
@@ -1037,26 +1041,20 @@ public class PageManager<T> {
                 return -1; // should never happen indeed (we can scroll because there are elements!)
             }
 
-            final int hidenItemCount = getExpectedTotalItems() - nChilds;
-
-            final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final View firstChild = recyclerView.getChildAt(0);
             final int firstChildPos = recyclerView.getChildAdapterPosition(firstChild);
-            final int numSidePages = (settings.getPageSpan() - 1) / 2;
-            final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(firstChildPos)); // this gives which page first child lives within
-            // NOTE: floorKey must not be null, otherwise we're doing something very bad....
-            final SortedMap<IdxRange, PageInfo<T>> headMap = pageMap.headMap(floorKey, true);
-            if (headMap.size() <= numSidePages) {
-                int reqPage = 0;
-                if (headMap.size() > 0) {
-                    final PageInfo<T> firstPage = headMap.get(headMap.firstKey());
-                    reqPage = Math.max(0, firstPage.pageNumber - 1);
+            if (firstChildPos <= settings.getPrefetchDistance()) {
+                int toRenew =  settings.getPagesToPrefetch();
+                int reqPage = -1;
+                if (pages.size() > 0) {
+                    reqPage = pages.first().pageNumber - 1;
                 }
-                int toRenew = Math.min(hidenPagesCount, numSidePages - headMap.size() + 1);
+
                 while (reqPage >= 0 && toRenew > 0) {
                     requestPage(reqPage--, true);
                     toRenew--;
                 }
+
             }
             return firstChild.getHeight();
         }
@@ -1066,25 +1064,16 @@ public class PageManager<T> {
             if (nChilds == 0) {
                 return -1; // should never happen indeed (we can scroll because there are elements!)
             }
-            final int hidenItemCount = getExpectedTotalItems() - nChilds;
-            final int hidenPagesCount = hidenItemCount / settings.getPageSize();
             final View lastChildView = recyclerView.getChildAt(nChilds - 1);
             final int lastChild = recyclerView.getChildAdapterPosition(lastChildView);
-            final int numSidePages = (settings.getPageSpan() - 1) / 2;
-            final IdxRange floorKey = pageMap.floorKey(IdxRange.needle(lastChild));
-            // NOTE: floorKey must not be null, otherwise we're doing something very bad....
-            final SortedMap<IdxRange, PageInfo<T>> tailMap = pageMap.tailMap(floorKey);
-            if (tailMap.size() <= numSidePages) {
-                // ok, last item shown is within span renew portion...
-
-                int pageNoRequest = maxPageNumberSeen + 1;
-                if (tailMap.size() > 0) {
-                    PageInfo<T> lastPage = tailMap.get(tailMap.lastKey());
-                    pageNoRequest = lastPage.pageNumber + 1;
+            if (getTotalCount() - 1 - lastChild <= settings.getPrefetchDistance()) {
+                int toRenew = settings.getPagesToPrefetch();
+                int pageRequest = maxPageNumberSeen + 1;
+                if (pages.size() > 0) {
+                    pageRequest = pages.last().pageNumber + 1;
                 }
-                int toRenew = Math.min(hidenPagesCount, numSidePages - tailMap.size() + 1);
                 while (toRenew > 0) {
-                    requestPage(pageNoRequest++, true);
+                    requestPage(pageRequest++, true);
                     toRenew--;
                 }
             }
