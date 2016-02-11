@@ -21,5 +21,6 @@ package com.inqbarna.rxpagingsupport;
  */
 public enum Source {
     Network,
-    Cache
+    Cache,
+    Memory
 }

@@ -153,6 +153,10 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
     }
 
     public RecyclerView.ItemDecoration newDebugDecoration(RecyclerView recyclerView) {
-        return new RxDebugItemDecoration(recyclerView, manager);
+        return newDebugDecoration(recyclerView, true);
+    }
+
+    public RecyclerView.ItemDecoration newDebugDecoration(RecyclerView recyclerView, boolean drawCounters) {
+        return new RxDebugItemDecoration(recyclerView, manager, drawCounters);
     }
 }

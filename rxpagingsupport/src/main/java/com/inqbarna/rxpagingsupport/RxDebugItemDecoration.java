@@ -43,6 +43,7 @@ class RxDebugItemDecoration extends RecyclerView.ItemDecoration {
 
     private Paint diskPaint;
     private Paint netPaint;
+    private Paint memoryPaint;
 
     private Path gPath;
     private int pathWidth;
@@ -50,30 +51,40 @@ class RxDebugItemDecoration extends RecyclerView.ItemDecoration {
     private int maxPathDim;
 
     public RxDebugItemDecoration(RecyclerView recyclerView, PageManager manager) {
-        counters = (TextView) LayoutInflater.from(recyclerView.getContext()).inflate(R.layout.rx_dbg_counters, recyclerView, false);
+        this(recyclerView, manager, true);
+    }
+
+    public RxDebugItemDecoration(RecyclerView recyclerView, PageManager manager, boolean drawCounters) {
+        counters = drawCounters ? (TextView) LayoutInflater.from(recyclerView.getContext()).inflate(R.layout.rx_dbg_counters, recyclerView, false) : null;
         rect = new Rect();
         container = new Rect();
         this.manager = manager;
         diskPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        diskPaint.setColor(Color.parseColor("#10E329"));
+        diskPaint.setColor(Color.parseColor("#3618C9"));
         diskPaint.setStyle(Paint.Style.FILL);
 
         netPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         netPaint.setColor(Color.parseColor("#DB0F3F"));
         netPaint.setStyle(Paint.Style.FILL);
 
+        memoryPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        memoryPaint.setColor(Color.parseColor("#10E329"));
+        memoryPaint.setStyle(Paint.Style.FILL);
+
         maxPathDim = (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 10, recyclerView.getResources().getDisplayMetrics());
     }
 
     @Override
     public void onDrawOver(Canvas c, RecyclerView parent, RecyclerView.State state) {
-        fillStats();
-        parent.getDrawingRect(container);
-        GravityCompat.apply(Gravity.CENTER_HORIZONTAL, counters.getMeasuredWidth(), counters.getMeasuredHeight(), container, rect, ViewCompat.LAYOUT_DIRECTION_LOCALE);
-        c.save();
-        c.translate(rect.left, 0);
-        counters.draw(c);
-        c.restore();
+        if (null != counters) {
+            fillStats();
+            parent.getDrawingRect(container);
+            GravityCompat.apply(Gravity.CENTER_HORIZONTAL, counters.getMeasuredWidth(), counters.getMeasuredHeight(), container, rect, ViewCompat.LAYOUT_DIRECTION_LOCALE);
+            c.save();
+            c.translate(rect.left, 0);
+            counters.draw(c);
+            c.restore();
+        }
 
         final RecyclerView.LayoutManager layoutManager = parent.getLayoutManager();
         Source source;
@@ -87,12 +98,24 @@ class RxDebugItemDecoration extends RecyclerView.ItemDecoration {
                 if (null != source) {
                     c.save();
                     c.translate(layoutManager.getDecoratedRight(child) - pathWidth, layoutManager.getDecoratedTop(child));
-                    c.drawPath(path, Source.Network == source ? netPaint : diskPaint);
+                    c.drawPath(path, paintForSource(source));
                     c.restore();
                 }
             }
         }
 
+    }
+
+    private Paint paintForSource(Source source) {
+        switch (source) {
+            case Memory:
+                return memoryPaint;
+            case Cache:
+                return diskPaint;
+            case Network:
+            default:
+                return netPaint;
+        }
     }
 
     private Path getPath(View child) {
