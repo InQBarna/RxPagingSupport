@@ -249,8 +249,8 @@ public class PageManager<T> {
     }
 
     private void sendInitialRequests() {
+        final int firstPage = settings.getFirstPageToRequest();
         if (pages.isEmpty()) {
-            final int firstPage = settings.getFirstPageToRequest();
             int numPagesReq = settings.getPagesToPrefetch();
             for (int i = 0; i < numPagesReq; i++) {
                 requestPage(i + firstPage, true);
@@ -259,7 +259,7 @@ public class PageManager<T> {
             // Ok, we must be recovering state... request exactly same pages, from Cache.... (current pages are just placeholders)
             settings.getLogger().info("Loading pages from saved state, get contents from disk cache", null);
             int shouldRequest = settings.getPageSpan();
-            int lastRequested = 0;
+            int lastRequested = firstPage;
             for (PageInfo<T> pageInfo : pages) {
                 lastRequested = pageInfo.pageNumber;
                 requestPage(lastRequested, false);
@@ -1051,7 +1051,7 @@ public class PageManager<T> {
                     reqPage = pages.first().pageNumber - 1;
                 }
 
-                while (reqPage >= 0 && toRenew > 0) {
+                while (reqPage >= settings.getFirstPageToRequest() && toRenew > 0) {
                     requestPage(reqPage--, true);
                     toRenew--;
                 }
