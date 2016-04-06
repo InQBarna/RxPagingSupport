@@ -250,9 +250,10 @@ public class PageManager<T> {
 
     private void sendInitialRequests() {
         if (pages.isEmpty()) {
+            final int firstPage = settings.getFirstPageToRequest();
             int numPagesReq = settings.getPagesToPrefetch();
             for (int i = 0; i < numPagesReq; i++) {
-                requestPage(i, true);
+                requestPage(i + firstPage, true);
             }
         } else {
             // Ok, we must be recovering state... request exactly same pages, from Cache.... (current pages are just placeholders)

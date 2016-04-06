@@ -26,11 +26,11 @@ import rx.schedulers.Schedulers;
  * @author David García <david.garcia@inqbarna.com>
  */
 public class Settings {
-    private static final int DEFAULT_PAGE_SPAN = 5;
-    public static final  int MAX_PAGE_SPAN     = 10;
-    public static final  int MIN_PAGE_SPAN     = 3;
-    private static final int DEFAULT_PAGE_SIZE = 10;
-
+    private static final int DEFAULT_PAGE_SPAN  = 5;
+    public static final  int MAX_PAGE_SPAN      = 10;
+    public static final  int MIN_PAGE_SPAN      = 3;
+    private static final int DEFAULT_PAGE_SIZE  = 10;
+    private static final int DEFAULT_FIRST_PAGE = 0;
 
     private int       pageSpan;
     private int       pageSize;
@@ -39,6 +39,11 @@ public class Settings {
     private boolean   fallbackToCacheAfterNetworkFail;
     private Scheduler deliveryScheduler;
     private Logger    logger;
+    private int firstPageToRequest;
+
+    public int getFirstPageToRequest() {
+        return firstPageToRequest;
+    }
 
     public interface Logger {
         void error(@NonNull String msg, @Nullable Throwable throwable);
@@ -82,11 +87,16 @@ public class Settings {
         prefetchPages = -1;
         fallbackToCacheAfterNetworkFail = true;
         prefetchDistance = -1;
+        firstPageToRequest = DEFAULT_FIRST_PAGE;
     }
 
 
     public static Builder builder() {
         return new Builder(new Settings());
+    }
+
+    public Builder buildUpon() {
+        return new Builder(this);
     }
 
     public static class Builder {
@@ -122,6 +132,11 @@ public class Settings {
             return this;
         }
 
+        public Builder setFirstPage(int firstPage) {
+            settings.firstPageToRequest = Math.max(DEFAULT_FIRST_PAGE, firstPage);
+            return this;
+        }
+
         public Builder prefetchDistance(int numItems) {
             settings.prefetchDistance = numItems;
             return this;
@@ -147,9 +162,8 @@ public class Settings {
             prefetchPages = pageSpan;
         }
 
-        if (-1 == prefetchDistance) {
-            prefetchDistance = (int)((double) pageSize * 0.2 + 0.5);
-        }
+        final int MIN_PREFETCH = (int) ((double) pageSize * 0.2 + 0.5);
+        prefetchDistance = Math.max(MIN_PREFETCH, prefetchDistance);
 
         if (null == logger) {
             logger = new Logger() {
