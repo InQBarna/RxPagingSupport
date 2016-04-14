@@ -44,7 +44,9 @@ public abstract class RxPagedAdapter<T, VH extends RecyclerView.ViewHolder & RxP
         this.settings = settings;
         this.manager = manager;
         this.manager.setAdapter(this);
-        this.manager.initStateFromBundle(savedInstanceState);
+        if (null != savedInstanceState) {
+            this.manager.initStateFromBundle(savedInstanceState);
+        }
         initState(savedInstanceState);
     }
 

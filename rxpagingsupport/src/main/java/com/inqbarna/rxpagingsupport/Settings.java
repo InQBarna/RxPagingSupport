@@ -32,6 +32,23 @@ public class Settings {
     private static final int DEFAULT_PAGE_SIZE  = 10;
     private static final int DEFAULT_FIRST_PAGE = 0;
 
+    private static final Logger INHIBIT_LOG_LOGGER = new Logger() {
+        @Override
+        public void error(@NonNull String msg, @Nullable Throwable throwable) {
+            // no-op... default logging is not enabled
+        }
+
+        @Override
+        public void info(@NonNull String msg, @Nullable Throwable throwable) {
+            // no-op... default logging is not enabled
+        }
+
+        @Override
+        public void debug(@NonNull String msg, @Nullable Throwable throwable) {
+            // no-op... default logging is not enabled
+        }
+    };
+
     private int       pageSpan;
     private int       pageSize;
     private int       prefetchPages;
@@ -90,13 +107,22 @@ public class Settings {
         firstPageToRequest = DEFAULT_FIRST_PAGE;
     }
 
+    private Settings(Settings other) {
+        pageSize = other.pageSize;
+        pageSpan = other.pageSpan;
+        prefetchPages = other.prefetchPages;
+        prefetchDistance = other.prefetchDistance;
+        fallbackToCacheAfterNetworkFail = other.fallbackToCacheAfterNetworkFail;
+        firstPageToRequest = other.firstPageToRequest;
+    }
+
 
     public static Builder builder() {
         return new Builder(new Settings());
     }
 
     public Builder buildUpon() {
-        return new Builder(this);
+        return new Builder(new Settings(this));
     }
 
     public static class Builder {
@@ -166,22 +192,7 @@ public class Settings {
         prefetchDistance = Math.max(MIN_PREFETCH, prefetchDistance);
 
         if (null == logger) {
-            logger = new Logger() {
-                @Override
-                public void error(@NonNull String msg, @Nullable Throwable throwable) {
-                    // no-op... default logging is not enabled
-                }
-
-                @Override
-                public void info(@NonNull String msg, @Nullable Throwable throwable) {
-                    // no-op... default logging is not enabled
-                }
-
-                @Override
-                public void debug(@NonNull String msg, @Nullable Throwable throwable) {
-                    // no-op... default logging is not enabled
-                }
-            };
+            logger = INHIBIT_LOG_LOGGER;
         }
     }
 
