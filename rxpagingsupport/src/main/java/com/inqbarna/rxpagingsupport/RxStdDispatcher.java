@@ -19,6 +19,8 @@ package com.inqbarna.rxpagingsupport;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
+import java.util.Collections;
+
 import rx.Observable;
 import rx.functions.Action1;
 import rx.functions.Func1;
@@ -97,7 +99,7 @@ public class RxStdDispatcher<T> implements RxPageDispatcher<T> {
             if (failIfNoSource) {
                 return Observable.error(new RxPagingException("Error in disk request (" + pageRequest + ") and no source defined", pageRequest));
             } else {
-                return Observable.empty();
+                return Observable.from(Collections.singleton(Page.<T>empty()));
             }
         } else {
             return diskSource.processRequest(pageRequest);

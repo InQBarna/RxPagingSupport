@@ -2,7 +2,6 @@ package com.inqbarna.rxpagingsupport;
 
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
-import android.util.FakeSparseArray;
 import android.util.SparseArray;
 
 import org.hamcrest.CustomTypeSafeMatcher;
@@ -12,7 +11,6 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.AdditionalAnswers;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.mockito.invocation.InvocationOnMock;
@@ -34,21 +32,20 @@ import rx.schedulers.Schedulers;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.core.Is.is;
-import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.argThat;
+import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.powermock.api.mockito.PowerMockito.whenNew;
 
 /**
  * @author David García <david.garcia@inqbarna.com>
  * @version 1.0 28/1/16
  */
 @RunWith(PowerMockRunner.class)
-@PrepareForTest({AndroidSchedulers.class, PageManager.class})
+@PrepareForTest({AndroidSchedulers.class})
 public class PageManagerTest {
 
 
@@ -64,9 +61,6 @@ public class PageManagerTest {
     @Mock
     SparseArray<PageRequest> sparseArray;
 
-    private FakeSparseArray<PageRequest> fakeArray;
-
-    private RxStdDispatcher<Item> itemDispatcher;
 
     private static Executor mainService;
     private Settings.Logger logger = new Settings.Logger() {
@@ -105,24 +99,42 @@ public class PageManagerTest {
     @Before
     public void setup() throws Exception {
 
-        settings = Settings.builder().setPageSpan(3).setPageSize(10).disableFallbackToCacheOnNetworkFailure().setDeliveryScheduler(Schedulers.trampoline()).setLogger(logger)
+        settings = Settings.builder().setPageSpan(3)
+                           .setPageSize(10)
+                           .disableFallbackToCacheOnNetworkFailure()
+                           .setDeliveryScheduler(Schedulers.trampoline())
+                           .setLogger(logger)
                            .build();
         PowerMockito.mockStatic(AndroidSchedulers.class);
         PowerMockito.when(AndroidSchedulers.mainThread()).thenReturn(Schedulers.immediate());
 
         MockitoAnnotations.initMocks(this);
+    }
 
-        itemDispatcher = RxStdDispatcher.newInstance(settings, networkSource, networkSource);
-        whenNew(SparseArray.class).withAnyArguments().thenReturn(sparseArray);
-        fakeArray = new FakeSparseArray<>(5);
+    @Test
+    public void completionAfterError() {
+        // If error in network, and cache is empty... load finises in empty manager
+        doAnswer(toAnswer(Observable.error(new UnsupportedOperationException("No net")))).when(networkSource).processRequest(anyPage());
+        doAnswer(toAnswer(Observable.just(Page.empty()))).when(diskSource).processRequest(anyPage());
 
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).size();
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).clear();
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).delete(anyInt());
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).indexOfKey(anyInt());
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).get(anyInt());
-        doAnswer(AdditionalAnswers.delegatesTo(fakeArray)).when(sparseArray).put(anyInt(), any(PageRequest.class));
+        Settings settingOverride = settings.buildUpon().enableFallbackToCacheOnNetworkFailure().build();
+        PageManager<Item> manager = new PageManager<Item>(settingOverride);
+        manager.beginConnection(getItemDispatcher(settingOverride, networkSource, diskSource));
+        verify(networkSource, atLeastOnce()).processRequest(anyPage());
+        verify(diskSource, atLeastOnce()).processRequest(anyPage());
 
+        assertThat(manager.getNumPages(), is(0));
+        assertThat(manager.isLastPageSeen(), is(true));
+    }
+
+    private Answer doCrash(final Throwable throwable) {
+        return new Answer() {
+            @Override
+            public Object answer(InvocationOnMock invocation) throws Throwable {
+                logger.debug("Will generate crash with: " + throwable.getMessage(), null);
+                throw throwable;
+            }
+        };
     }
 
     @Test
@@ -135,7 +147,7 @@ public class PageManagerTest {
 
 
         PageManager<Item> manager = new PageManager<Item>(settings);
-        manager.beginConnection(itemDispatcher);
+        manager.beginConnection(getItemDispatcher(settings, networkSource, networkSource));
 
         verify(networkSource, times(3)).processRequest(anyPage());
         assertThat(manager.getTotalCount(), is(15 + 18));
@@ -151,7 +163,7 @@ public class PageManagerTest {
 
 
         PageManager<Item> manager = new PageManager<Item>(settings);
-        manager.beginConnection(itemDispatcher);
+        manager.beginConnection(getItemDispatcher(settings, networkSource, networkSource));
 
         assertThat(manager.getTotalCount(), is(2 * pageSize + 1));
         assertThat(manager.getNumPages(), is(3));
@@ -190,7 +202,7 @@ public class PageManagerTest {
         doAnswer(toAnswer(generateSourcedItems(Source.Network, 2, 6 * pageSize, 3 * pageSize))).when(networkSource).processRequest(page(2));
 
         PageManager<Item> manager = new PageManager<Item>(settings);
-        manager.beginConnection(itemDispatcher);
+        manager.beginConnection(getItemDispatcher(settings, networkSource, this.networkSource));
 
         assertThat(manager.getTotalCount(), is(3 * pageSize));
         assertThat(manager.getNumPages(), is(1));
@@ -266,4 +278,8 @@ public class PageManagerTest {
 //        return Observable.from(Collections.singletonList(page));
     }
 
+    public RxStdDispatcher<Item> getItemDispatcher(
+            Settings settings, RxStdDispatcher.RxPageSource<Item> networkSource, RxStdDispatcher.RxPageSource<Item> diskSource) {
+        return RxStdDispatcher.newInstance(settings, networkSource, diskSource);
+    }
 }

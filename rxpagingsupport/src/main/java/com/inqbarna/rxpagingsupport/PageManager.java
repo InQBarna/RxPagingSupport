@@ -21,8 +21,8 @@ import android.os.Parcel;
 import android.os.Parcelable;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.util.SparseArrayCompat;
 import android.support.v7.widget.RecyclerView;
-import android.util.SparseArray;
 import android.view.View;
 
 import java.util.ArrayList;
@@ -429,7 +429,7 @@ public class PageManager<T> {
 
     private       NavigableSet<PageInfo<T>>           pages;
     private       NavigableMap<IdxRange, PageInfo<T>> pageMap;
-    private final SparseArray<PageRequest>            pendingRequests;
+    private final SparseArrayCompat<PageRequest>      pendingRequests;
 
     @Nullable private RecyclerView.Adapter          adapter;
     private           PublishSubject<PageRequest>   requestsSubject;
@@ -540,7 +540,7 @@ public class PageManager<T> {
         maxPageNumberSeen = -1;
         pageMap = new ConcurrentSkipListMap<>();
         deliverMessagesScheduler = settings.getDeliveryScheduler();
-        pendingRequests = new SparseArray<>(5);
+        pendingRequests = new SparseArrayCompat<>(5);
 
         if (null != savedInstanceState) {
             initStateFromBundle(savedInstanceState);

@@ -114,6 +114,8 @@ public class Settings {
         prefetchDistance = other.prefetchDistance;
         fallbackToCacheAfterNetworkFail = other.fallbackToCacheAfterNetworkFail;
         firstPageToRequest = other.firstPageToRequest;
+        logger = other.logger;
+        deliveryScheduler = other.deliveryScheduler;
     }
 
 
@@ -139,6 +141,11 @@ public class Settings {
 
         public Builder disableFallbackToCacheOnNetworkFailure() {
             settings.fallbackToCacheAfterNetworkFail = false;
+            return this;
+        }
+
+        public Builder enableFallbackToCacheOnNetworkFailure() {
+            settings.fallbackToCacheAfterNetworkFail = true;
             return this;
         }
 
